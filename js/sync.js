@@ -17,16 +17,26 @@
     return obj.error || '断られました';
   }
 
-  function post(u, payload) {
+  function wait(ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); }
+
+  /* ★Google は、受け口が動いたあと返事を受け取る段（script.googleusercontent.com）で、
+     ときどき 404 を返します（2026-09-26 に本物で6回に1回ほど）。
+     受け口の仕事は済んでいるので、同じものをもう一度送って大丈夫です
+     （書き込みは id ごとの上書きなので、2回届いても1行のまま）。2回まで黙って送り直します */
+  function post(u, payload, tries) {
+    tries = tries || 0;
     return fetch(u, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload),
       redirect: 'follow'
     }).then(function (r) { return r.text(); }).then(function (t) {
-      var obj;
-      try { obj = JSON.parse(t); }
-      catch (e) { throw new Error('返事が読めません（URLがウェブアプリのものか確かめてください）'); }
+      var obj = null;
+      try { obj = JSON.parse(t); } catch (e) { obj = null; }
+      if (!obj) {
+        if (tries < 2) return wait(800 * (tries + 1)).then(function () { return post(u, payload, tries + 1); });
+        throw new Error('返事が読めません（URLがウェブアプリのものか確かめてください）');
+      }
       if (!obj.ok) throw new Error(explain(obj));
       return obj;
     });
