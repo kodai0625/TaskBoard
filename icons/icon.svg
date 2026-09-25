@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- ホーム画面のアイコン（角まで塗る。角丸は iPhone が付ける）。
+       紺の地に、クリーム色の紙。上の行＝済み（藍）、下の行＝まだ（橙）。
+       藍と橙は、画面の「個人」「会社」の色にそろえてある -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c3e50"/>
+      <stop offset="1" stop-color="#3d566e"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g id="mark">
+    <rect x="96" y="96" width="320" height="320" rx="44" fill="#f7f4ee"/>
+    <rect x="138" y="158" width="72" height="72" rx="18" fill="#5b93b8"/>
+    <path d="M156 195l16 16 26-32" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="232" y="178" width="142" height="32" rx="16" fill="#5b93b8"/>
+    <rect x="144" y="288" width="60" height="60" rx="15" fill="none" stroke="#c98a4b" stroke-width="12"/>
+    <rect x="232" y="302" width="142" height="32" rx="16" fill="#c98a4b"/>
+  </g>
+</svg>
