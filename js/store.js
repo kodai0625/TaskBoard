@@ -4,10 +4,12 @@
        tb.personal.data … 個人のタスクとメモ
        tb.work.data     … 会社のタスクとメモ
      1つの入れ物に「どちらか」の印を付ける形にはしません。印を付け忘れた1件が、
-     反対側の受け口に送られる事故を、形の上で起こせなくするためです（設計.md）
-   ・つなぎ先・合言葉・同期の目印も、側ごとに別のキーです
-       tb.personal.meta／tb.work.meta … { url, pin, since, lastSyncAt }
-   ・送信箱（outbox）に積んだものを、js/sync.js がその側の受け口へだけ送ります */
+     反対側のタブ（保管庫）に入る事故を、形の上で起こせなくするためです（設計.md）
+   ・受け口は1つ（2026-09-26 決定。個人の Google アカウントに1つ）。つなぎ先と合言葉は1組だけ
+       tb.conn … { url, pin }
+   ・同期の目印は側ごとに別のキーです（受け口の中でも側ごとに別のタブに入ります）
+       tb.personal.meta／tb.work.meta … { since, lastSyncAt }
+   ・送信箱（outbox）に積んだものを、js/sync.js が「その側」の印を付けて送ります */
 (function (global) {
   'use strict';
 
@@ -16,12 +18,14 @@
   var KEY_UI = 'tb.ui';
 
   var bags = {};      // { personal: {task:{}, memo:{}, outbox:[]}, work: {...} }
-  var metas = {};     // { personal: {url, pin, since, lastSyncAt}, work: {...} }
+  var metas = {};     // { personal: {since, lastSyncAt}, work: {...} }
+  var conn = null;    // { url, pin } 受け口は1つ
+  var KEY_CONN = 'tb.conn';
   var ui = null;      // { space, view }
 
   function key(space) { return 'tb.' + space + '.data'; }
   function metaKey(space) { return 'tb.' + space + '.meta'; }
-  function emptyMeta() { return { url: '', pin: '', since: 0, lastSyncAt: 0 }; }
+  function emptyMeta() { return { since: 0, lastSyncAt: 0 }; }
 
   function empty() { return { task: {}, memo: {}, outbox: [] }; }
 
@@ -54,6 +58,13 @@
       Object.keys(def).forEach(function (k) { if (!(k in m)) m[k] = def[k]; });
       metas[sp] = m;
     });
+    conn = read(KEY_CONN, null);
+    if (!conn) {
+      // 2026-09-26 より前は側ごとに持っていた。個人の側に入っていたものを引き継ぐ
+      var old = metas.personal;
+      conn = { url: old.url || '', pin: old.pin || '' };
+    }
+    SPACES.forEach(function (sp) { delete metas[sp].url; delete metas[sp].pin; });
     ui = read(KEY_UI, null) || {};
     if (SPACES.indexOf(ui.space) < 0) ui.space = 'personal';
     if (['task', 'memo'].indexOf(ui.view) < 0) ui.view = 'task';
@@ -123,6 +134,14 @@
     outboxCount: function (space) { check(space); return bags[space].outbox.length; },
 
     /* ---------------- 同期の受け口（js/sync.js から使う） ---------------- */
+
+    conn: function () { return conn; },
+    saveConn: function () { write(KEY_CONN, conn); },
+
+    /** つなぎ直したときは、両方の側を最初から取り込み直す */
+    resetSince: function () {
+      SPACES.forEach(function (sp) { metas[sp].since = 0; write(metaKey(sp), metas[sp]); });
+    },
 
     meta: function (space) { check(space); return metas[space]; },
     saveMeta: function (space) { check(space); write(metaKey(space), metas[space]); },

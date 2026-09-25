@@ -94,14 +94,14 @@
     el.className = 'syncbar ' + s.kind;
     el.textContent = text;
     el.title = s.kind === 'error' ? S.lastError
-      : s.kind === 'off' ? '「' + label() + '」の受け口につないでいません。書いたものはこの端末の中だけにあります' : '';
+      : s.kind === 'off' ? '受け口につないでいません。書いたものはこの端末の中だけにあります' : '';
   }
 
-  /** 何か直したら、すこし待ってから、その側の受け口へだけ送る */
+  /** 何か直したら、すこし待ってから、その側の分だけ送る */
   var pushTimers = {};
   function schedulePush(sp) {
     paintSync();
-    if (!Sync.of[sp].enabled()) return;
+    if (!Sync.enabled()) return;
     clearTimeout(pushTimers[sp]);
     pushTimers[sp] = setTimeout(function () { Sync.of[sp].run(false); }, 1200);
   }
@@ -376,20 +376,23 @@
   /* ================= 設定 ================= */
   function renderSettings() {
     var h = '';
-    var S = Sync.of[space()], m = Store.meta(space());
-    var st = S.state();
-    h += '<div class="secttl">「' + U.esc(label()) + '」の受け口</div><div class="card">'
+    var c = Store.conn();
+    var pending = 0, errs = [];
+    Store.SPACES.forEach(function (sp) {
+      pending += Store.outboxCount(sp);
+      if (Sync.of[sp].lastError) errs.push(label(sp) + '：' + Sync.of[sp].lastError);
+    });
+    h += '<div class="secttl">受け口</div><div class="card">'
       + '<div class="setrow"><div><div class="k">つなぎ先と合言葉</div><div class="d">'
-      + (S.enabled() ? 'つないでいます' + (m.url ? '' : '（アプリに入っているつなぎ先）')
-          : (S.url() ? '合言葉がまだです' : 'つないでいません（いまは端末の中だけ）'))
+      + (Sync.enabled() ? 'つないでいます' + (c.url ? '' : '（アプリに入っているつなぎ先）')
+          : (Sync.url() ? '合言葉がまだです' : 'つないでいません（いまは端末の中だけ）'))
       + '</div></div>'
-      + '<button type="button" class="mini" id="s-conn">' + (S.enabled() ? '直す' : 'つなぐ') + '</button></div>'
-      + '<div class="setrow"><div><div class="k">送っていない記録</div><div class="d">電波がない間に書いたものはここに溜まります</div></div>'
-      + '<div style="display:flex;gap:8px;align-items:center"><b style="white-space:nowrap">' + st.pending + '件</b>'
+      + '<button type="button" class="mini" id="s-conn">' + (Sync.enabled() ? '直す' : 'つなぐ') + '</button></div>'
+      + '<div class="setrow"><div><div class="k">送っていない記録</div><div class="d">電波がない間に書いたものはここに溜まります（個人と会社の合計）</div></div>'
+      + '<div style="display:flex;gap:8px;align-items:center"><b style="white-space:nowrap">' + pending + '件</b>'
       + '<button type="button" class="mini" id="s-sync">今すぐ同期</button></div></div>'
-      + (S.lastError ? '<div class="warnbox">前回うまくいきませんでした：' + U.esc(S.lastError) + '</div>' : '')
-      + '<div class="note" style="margin-top:6px">個人と会社は、受け口もつなぎ先も合言葉も別々です。'
-      + '反対側の受け口のURLを入れても、受け口が断るので中身は混ざりません。</div>'
+      + (errs.length ? '<div class="warnbox">前回うまくいきませんでした：<br>' + errs.map(U.esc).join('<br>') + '</div>' : '')
+      + '<div class="note" style="margin-top:6px">受け口は1つです。個人と会社は、受け口のシートの中で別々のタブに入ります。</div>'
       + '</div>';
 
     h += '<div class="secttl">いまの数</div><div class="card">';
@@ -410,7 +413,7 @@
       + '<div class="setrow"><div><div class="k">控えから戻す</div><div class="d">書き出した文字を貼って戻します</div></div>'
       + '<button type="button" class="mini" id="s-in">戻す</button></div>'
       + '<div class="setrow"><div><div class="k">この端末から消す</div><div class="d">「' + U.esc(label()) + '」のタスクとメモを、この端末から消します。'
-      + (S.enabled() ? '受け口の記録は残るので、次の同期で戻ります' : '戻せません') + '</div></div>'
+      + (Sync.enabled() ? '受け口の記録は残るので、次の同期で戻ります' : '戻せません') + '</div></div>'
       + '<button type="button" class="mini danger" id="s-wipe">消す</button></div>'
       + '<div class="note" style="margin-top:6px">個人と会社の控えは、混ざらないように別々の1枚にしてあります。</div>'
       + '</div>';
@@ -424,12 +427,12 @@
     body.innerHTML = h;
 
     body.querySelector('#s-back').onclick = function () { show(lastView); };
-    body.querySelector('#s-conn').onclick = function () { connect(space()); };
+    body.querySelector('#s-conn').onclick = connect;
     body.querySelector('#s-sync').onclick = function () {
-      var sp = space();
-      if (!Sync.of[sp].enabled()) { connect(sp); return; }
+      if (!Sync.enabled()) { connect(); return; }
       toast('同期しています…');
-      Sync.of[sp].run(true).then(function () { toast('同期しました'); renderAll(); })
+      Promise.all(Store.SPACES.map(function (sp) { return Sync.of[sp].run(true); }))
+        .then(function () { toast('同期しました'); renderAll(); })
         .catch(function (e) { global.alert('うまくいきませんでした：\n' + e.message); renderAll(); });
     };
     body.querySelector('#s-out').onclick = function () {
@@ -474,27 +477,26 @@
     };
   }
 
-  /* ---------- 受け口につなぐ（つなぎ先と合言葉を入れる） ---------- */
-  function connect(sp) {
-    var S = Sync.of[sp], m = Store.meta(sp);
-    modal('<h2>「' + U.esc(label(sp)) + '」の受け口につなぐ</h2>'
-      + '<div class="hint">★' + U.esc(label(sp)) + 'の Google アカウントで作った受け口のものを入れてください。</div>'
+  /* ---------- 受け口につなぐ（つなぎ先と合言葉を入れる。受け口は1つ） ---------- */
+  function connect() {
+    var c = Store.conn();
+    modal('<h2>受け口につなぐ</h2>'
       + '<div class="f"><label for="c-url">つなぎ先（…/exec で終わるURL）</label>'
-      + '<input type="text" id="c-url" value="' + U.esc(m.url || S.url()) + '" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec"></div>'
+      + '<input type="text" id="c-url" value="' + U.esc(c.url || Sync.url()) + '" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec"></div>'
       + '<div class="f"><label for="c-pin">合言葉（PIN）</label>'
-      + '<input type="text" id="c-pin" value="' + U.esc(m.pin) + '" autocapitalize="off" autocorrect="off" spellcheck="false"></div>'
-      + '<div class="hint">つないだあと、この端末の中のものも受け口へ送ります。</div>'
+      + '<input type="text" id="c-pin" value="' + U.esc(c.pin) + '" autocapitalize="off" autocorrect="off" spellcheck="false"></div>'
+      + '<div class="hint">つないだあと、この端末の中のもの（個人も会社も）を受け口へ送ります。</div>'
       + '<div class="acts">'
-      + (S.enabled() ? '<button type="button" class="del" id="c-off">つなぐのをやめる</button>' : '')
+      + (Sync.enabled() ? '<button type="button" class="del" id="c-off">つなぐのをやめる</button>' : '')
       + '<button type="button" id="c-cancel">やめる</button>'
       + '<button type="button" class="go" id="c-ok">つなぐ</button></div>',
       function (root) {
         root.querySelector('#c-cancel').onclick = closeModal;
         var off = root.querySelector('#c-off');
         if (off) off.onclick = function () {
-          if (!global.confirm('「' + label(sp) + '」の受け口とのつながりを切ります（受け口の記録は消えません）')) return;
-          m.pin = ''; Store.saveMeta(sp);
-          S.lastError = '';
+          if (!global.confirm('受け口とのつながりを切ります（受け口の記録は消えません）')) return;
+          c.pin = ''; Store.saveConn();
+          Store.SPACES.forEach(function (sp) { Sync.of[sp].lastError = ''; });
           closeModal(); renderAll(); toast('つなぐのをやめました');
         };
         root.querySelector('#c-ok').onclick = function () {
@@ -503,19 +505,18 @@
           if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(u)) { global.alert('つなぎ先は https://script.google.com/…/exec の形です'); return; }
           if (!p) { global.alert('合言葉を入れてください'); return; }
           var btn = this; btn.disabled = true; btn.textContent = 'たしかめています…';
-          S.test(u, p).then(function () {
-            var def = (APP.spaces[sp] || {}).syncUrl || '';
-            m.url = (u === def) ? '' : u;
-            m.pin = p;
-            m.since = 0;                 // つなぎ直したら最初から取り込む
-            S.lastError = '';
-            Store.saveMeta(sp);
+          Sync.test(u, p).then(function () {
+            c.url = (u === (APP.syncUrl || '')) ? '' : u;
+            c.pin = p;
+            Store.saveConn();
+            Store.resetSince();          // つなぎ直したら最初から取り込む
+            Store.SPACES.forEach(function (sp) { Sync.of[sp].lastError = ''; });
             closeModal();
             toast('つながりました。送っています…');
-            return S.run(true);
+            return Promise.all(Store.SPACES.map(function (sp) { return Sync.of[sp].run(true); }));
           }).then(function () {
             Sync.start();
-            renderAll(); toast('「' + label(sp) + '」の受け口とつながりました');
+            renderAll(); toast('受け口とつながりました');
           }).catch(function (e) {
             btn.disabled = false; btn.textContent = 'つなぐ';
             global.alert('つながりませんでした：\n' + e.message);

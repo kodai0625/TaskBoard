@@ -1,20 +1,19 @@
 /* Task Board 同期（Pair Board と同じ形を、側ごとに1つずつ）
-   ・★個人と会社は、同期の係も別々です。それぞれ自分の側の送信箱だけを、自分の側の受け口へ送ります
-   ・毎回「いまどちら側か（space）」を添えて送ります。受け口は反対側の印を断るので、
-     URL を入れ違えても中身は混ざりません（gas/コード.gs）
+   ・受け口は1つ（つなぎ先と合言葉も1組）。同期の係は側ごとに1つずつ動きます
+   ・★毎回「どちら側か（space）」を添えて送ります。受け口はその側のタブだけを読み書きするので、
+     プライベートと仕事は受け口の中でも混ざりません（gas/コード.gs）
    ・次に受け取る目印（since）は必ず受け口が返した now を使います。
      手元の時計はGoogleの時計とズレるので、自分の時計を使うと取りこぼします */
 (function (global) {
   'use strict';
 
   var Store = null;
-  var LABEL = function (sp) { return (APP.spaces[sp] || {}).label || sp; };
 
   function explain(obj) {
     if (obj.error === 'bad_pin') return '合言葉が違います';
     if (obj.error === 'locked') return '合言葉を何度もまちがえたので、10分止まっています';
-    if (obj.error === 'wrong_space') return 'このつなぎ先は「' + LABEL(obj.space) + '」の受け口です。入れる場所が違います';
-    if (obj.error === 'not_setup') return '受け口の用意（setupPersonal／setupWork）がまだです';
+    if (obj.error === 'bad_space') return 'どちら側かが分からないので断られました（アプリが古いかもしれません）';
+    if (obj.error === 'not_setup') return '受け口の用意（setup）がまだです';
     return obj.error || '断られました';
   }
 
@@ -36,13 +35,7 @@
   function make(space) {
     var busy = false;
 
-    function url() {
-      var m = Store.meta(space);
-      var def = ((global.APP && APP.spaces[space]) || {}).syncUrl || '';
-      return (m.url || def || '').trim();
-    }
-    function pin() { return (Store.meta(space).pin || '').trim(); }
-    function enabled() { return !!url() && !!pin(); }
+    var url = Sync.url, pin = Sync.pin, enabled = Sync.enabled;
 
     var S = {
       space: space,
@@ -92,10 +85,6 @@
         });
       },
 
-      /** つながるか確かめるだけ（設定で入れた直後に使う） */
-      test: function (u, p) {
-        return post(u.trim(), { space: space, pin: (p || '').trim(), action: 'ping' });
-      }
     };
     return S;
   }
@@ -103,6 +92,19 @@
   var timer = null;
   var Sync = {
     of: {},
+
+    /** 受け口は1つ。設定で入れた値が優先。無ければ公開のときに入れたもの（config.js） */
+    url: function () {
+      var c = Store.conn();
+      return (c.url || (global.APP && APP.syncUrl) || '').trim();
+    },
+    pin: function () { return (Store.conn().pin || '').trim(); },
+    enabled: function () { return !!Sync.url() && !!Sync.pin(); },
+
+    /** つながるか確かめるだけ（設定で入れた直後に使う） */
+    test: function (u, p) {
+      return post(u.trim(), { pin: (p || '').trim(), action: 'ping' });
+    },
 
     init: function (store) {
       Store = store;
