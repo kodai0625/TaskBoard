@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">フォーカスのタスク管理アプリアイコン</title>
+  <desc id="desc">チャコールプラムの角丸正方形に、アイボリーの四方向の光とシャンパンゴールドのチェックマーク</desc>
+  <defs>
+    <linearGradient id="plum" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#292331"/>
+      <stop offset="1" stop-color="#211C29"/>
+    </linearGradient>
+    <linearGradient id="ivory" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F1EDE4"/>
+      <stop offset="1" stop-color="#E4DED3"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#D8B77B"/>
+      <stop offset="1" stop-color="#BD995F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="192" fill="url(#plum)"/>
+  <g fill="url(#ivory)">
+    <path d="M 512 178 C 524 178 531 188 536 201 L 599 380 Q 607 399 592 414 L 533 470 Q 512 490 491 470 L 432 414 Q 417 399 425 380 L 488 201 C 493 188 500 178 512 178 Z"/>
+    <path d="M 187 512 C 187 500 197 493 210 488 L 365 431 Q 385 424 400 439 L 459 491 Q 480 512 459 533 L 400 585 Q 385 600 365 593 L 210 536 C 197 531 187 524 187 512 Z"/>
+    <path d="M 837 512 C 837 500 827 493 814 488 L 659 431 Q 639 424 624 439 L 565 491 Q 544 512 565 533 L 624 585 Q 639 600 659 593 L 814 536 C 827 531 837 524 837 512 Z"/>
+    <path d="M 512 545 Q 526 545 537 557 L 592 610 Q 607 625 600 644 L 536 821 C 531 835 524 844 512 844 C 500 844 493 835 488 821 L 424 644 Q 417 625 432 610 L 487 557 Q 498 545 512 545 Z"/>
+  </g>
+  <path d="M 594 675 L 668 749 L 819 598" fill="none" stroke="url(#gold)" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
