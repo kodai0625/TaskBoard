@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=4a7e70ed">
+<link rel="stylesheet" href="css/style.css?v=7dde5aa2">
 </head>
 <body data-space="personal">
 
@@ -62,7 +62,17 @@
           <button type="button" data-prio="low">低</button>
         </div>
       </div>
-      <div class="optrow">
+      <div class="optrow" id="rowDo">
+        <span class="optlbl">やる日</span>
+        <div class="duepick" id="addDoPick">
+          <button type="button" class="chip on" data-q="">なし</button>
+          <button type="button" class="chip" data-q="0">今日</button>
+          <button type="button" class="chip" data-q="1">明日</button>
+          <button type="button" class="chip" data-q="we">週末</button>
+          <input type="date" id="addDo" aria-label="やる日の日付">
+        </div>
+      </div>
+      <div class="optrow" id="rowDue">
         <span class="optlbl">期限</span>
         <div class="duepick" id="addDuePick">
           <button type="button" class="chip on" data-q="">なし</button>
@@ -139,9 +149,9 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=4a7e70ed"></script>
-<script src="js/store.js?v=4a7e70ed"></script>
-<script src="js/sync.js?v=4a7e70ed"></script>
-<script src="js/app.js?v=4a7e70ed"></script>
+<script src="js/config.js?v=7dde5aa2"></script>
+<script src="js/store.js?v=7dde5aa2"></script>
+<script src="js/sync.js?v=7dde5aa2"></script>
+<script src="js/app.js?v=7dde5aa2"></script>
 </body>
 </html>

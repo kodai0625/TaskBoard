@@ -154,6 +154,18 @@
     renderAll();
   }
 
+  /* ---------- やる日（2026-09-29）。期限（いつまでに）とは別に「いつやるか」。doOn: 'YYYY-MM-DD' ----------
+     予定タブには「やる日」に出す（やる日が無ければ、これまでどおり期限の日に出す）。時刻は、やる日の時刻 */
+  function planDay(t) { return t.doOn || t.due || ''; }
+  function doBadge(t) {
+    if (!t.doOn || t.done) return '';
+    var n = U.daysFrom(t.doOn);
+    if (n < 0) return '<span class="dob late">やる日 ' + (-n) + '日過ぎ</span>';
+    if (n === 0) return '<span class="dob now">今日やる</span>';
+    if (n === 1) return '<span class="dob">明日やる</span>';
+    return '<span class="dob">' + U.md(t.doOn) + 'にやる</span>';
+  }
+
   /** 期限の札。過ぎた・今日・明日を目立たせる */
   function dueBadge(due) {
     if (!due) return '';
@@ -294,18 +306,21 @@
   /* ================= タスク ================= */
   var showDone = false;
 
+  function nearDay(t) {
+    var ds = [t.doOn, t.due].filter(Boolean).sort();
+    return ds[0] || '';
+  }
   function sortOpen(a, b) {
-    // 期限のあるものが先（近い順）。同じ日の中と、期限の無いものの中は、重要度の高い順 → 新しい順
-    if (a.due && b.due && a.due !== b.due) return a.due < b.due ? -1 : 1;
-    if (a.due && !b.due) return -1;
-    if (!a.due && b.due) return 1;
-    var r = PRIO[prioOf(a)].rank - PRIO[prioOf(b)].rank;
-    if (r) return r;
+    // やる日と期限の近いほうの日で並べる（明日やるものは、期限が先でも上に来る）。同じ日・日の無いものは重要度の高い順
+    var ad = nearDay(a), bd = nearDay(b);
+    if (ad !== bd) { if (!ad) return 1; if (!bd) return -1; return ad < bd ? -1 : 1; }
+    var r0 = PRIO[prioOf(a)].rank - PRIO[prioOf(b)].rank;
+    if (r0) return r0;
     return (b.createdAt || 0) - (a.createdAt || 0);
   }
 
   function taskRow(t) {
-    var sub = prioBadge(t) + dueBadge(t.due) + (t.time ? '<span class="due">' + timeLabel(t) + '</span>' : '')
+    var sub = prioBadge(t) + doBadge(t) + dueBadge(t.due) + (t.time ? '<span class="due">' + timeLabel(t) + '</span>' : '')
       + (t.note ? '<span class="hasnote">メモあり</span>' : '');
     return '<div class="trow' + (t.done ? ' done' : '') + '" data-id="' + U.esc(t.id) + '" data-prio="' + prioOf(t) + '">'
       + '<button type="button" class="ck" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
@@ -415,11 +430,13 @@
     var d = new Date(), today = U.today();
     var over = open.filter(function (t) { return t.due && t.due < today; }).length;
     var now = open.filter(function (t) { return t.due === today; }).length;
+    var todo = open.filter(function (t) { return t.doOn && t.doOn <= today; }).length;
     var high = open.filter(function (t) { return prioOf(t) === 'high'; }).length;
     var wait = dev.filter(function (t) { return t.section === 'ko-dai'; }).length;
     var f = [];
     f.push('<span class="fact calm">' + (open.length ? '残り <b>' + open.length + '</b>' : 'やることはありません') + '</span>');
     if (over) f.push('<span class="fact over">期限切れ <b>' + over + '</b></span>');
+    if (todo) f.push('<span class="fact todo">今日やる <b>' + todo + '</b></span>');
     if (now) f.push('<span class="fact now">今日まで <b>' + now + '</b></span>');
     if (high) f.push('<span class="fact high">重要度 高 <b>' + high + '</b></span>');
     if (wait) f.push('<span class="fact wait">返事待ち <b>' + wait + '</b></span>');
@@ -466,7 +483,7 @@
   }
 
   /* ---------- 足すときに決める重要度と期限 ---------- */
-  var addPrio = 'mid', addDue = '';
+  var addPrio = 'mid', addDue = '', addDo = '';
   var addTime = '', addDur = 30, addRepeat = '', addDaysSel = [], addMday = '', moreOpen = false;
 
   function quickDate(q) {
@@ -485,6 +502,13 @@
       b.classList.toggle('on', on);
     });
     document.getElementById('addDue').value = addDue;
+    var hitDo = false;
+    document.querySelectorAll('#addDoPick [data-q]').forEach(function (b) {
+      var on = !hitDo && quickDate(b.dataset.q) === addDo;
+      if (on) hitDo = true;
+      b.classList.toggle('on', on);
+    });
+    document.getElementById('addDo').value = addDo;
     // 時刻・くり返し
     document.getElementById('addMore').hidden = !moreOpen;
     document.getElementById('addMoreBtn').textContent = (moreOpen ? '▾' : '▸') + ' 時刻・くり返し'
@@ -498,11 +522,12 @@
     document.getElementById('addMday').innerHTML = mdayOptions(addMday || new Date().getDate());
     document.getElementById('addDays').outerHTML = daysPicker('addDays', addDaysSel);
     // くり返すときは期限を使わない（毎日・毎週その日の分がある）
-    document.querySelector('#taskOpts .optrow:nth-child(2)').classList.toggle('off', !!addRepeat);
+    document.getElementById('rowDue').classList.toggle('off', !!addRepeat);
+    document.getElementById('rowDo').classList.toggle('off', !!addRepeat);
     document.getElementById('addMoreHint').textContent = addRepeat
       ? '習慣として足します。期限は使いません。済みは日ごとに付けます'
         + (addRepeat === 'monthly' ? '（その月に無い日は、その月の最後の日にします）' : '')
-      : (addTime && !addDue ? '期限が無いので、今日の予定として足します' : '');
+      : (addTime && !addDo ? 'やる日が無いので、今日の予定（今日やる）として足します' : '');
   }
 
   function addTask(title) {
@@ -510,15 +535,15 @@
     if (!title) return false;
     if (!confirmWork(title)) return false;
     if (addRepeat === 'weekly' && !addDaysSel.length) { toast('曜日を選んでください'); return false; }
-    var rec = { title: title, due: addRepeat ? '' : addDue, prio: addPrio, note: '', done: false,
+    var rec = { title: title, due: addRepeat ? '' : addDue, doOn: addRepeat ? '' : addDo, prio: addPrio, note: '', done: false,
                 time: addTime, dur: addTime ? addDur : 0, repeat: addRepeat,
                 days: addRepeat === 'weekly' ? sortDays(addDaysSel) : [] };
     if (addRepeat === 'monthly') rec.mday = addMday || new Date().getDate();
-    if (rec.time && !rec.repeat && !rec.due) rec.due = U.today();     // 時刻だけ決めたら今日の予定
+    if (rec.time && !rec.repeat && !rec.doOn) rec.doOn = U.today();   // 時刻だけ決めたら、今日やる予定
     if (rec.repeat) rec.doneDates = {};
     Store.put(space(), 'task', rec);
     toast(rec.repeat ? '習慣を足しました（' + repeatLabel(rec) + '）' : 'タスクを足しました');
-    addPrio = 'mid'; addDue = '';        // 足したら元に戻す
+    addPrio = 'mid'; addDue = ''; addDo = '';   // 足したら元に戻す
     addTime = ''; addDur = 30; addRepeat = ''; addDaysSel = []; addMday = '';
     paintAddOpts();
     renderAll();
@@ -569,6 +594,12 @@
       + '<input type="time" id="e-time" step="300" value="' + U.esc(t.time || '') + '">'
       + '<select id="e-dur">' + durOptions(Number(t.dur) || 30) + '</select>'
       + '<button type="button" class="mini" id="e-notime">なし</button></div></div>'
+      + '<div class="f edo"' + (rep ? ' hidden' : '') + '><label for="e-do">やる日</label>'
+      + '<div class="f2"><input type="date" id="e-do" value="' + U.esc(t.doOn || '') + '">'
+      + '<button type="button" class="mini" data-do="">なし</button></div>'
+      + '<div class="quick">' + quick.map(function (q) {
+          return '<button type="button" class="chip" data-do="' + U.addDays(q[1]) + '">' + q[0] + '</button>';
+        }).join('') + '</div></div>'
       + '<div class="f edue"' + (rep ? ' hidden' : '') + '><label for="e-due">期限</label>'
       + '<div class="f2"><input type="date" id="e-due" value="' + U.esc(t.due || '') + '">'
       + '<button type="button" class="mini" data-due="">なし</button></div>'
@@ -595,6 +626,10 @@
         m.querySelectorAll('[data-due]').forEach(function (b) {
           b.onclick = function () { due.value = b.dataset.due; };
         });
+        var doIn = m.querySelector('#e-do');
+        m.querySelectorAll('[data-do]').forEach(function (b) {
+          b.onclick = function () { doIn.value = b.dataset.do; };
+        });
         m.querySelectorAll('#e-rep [data-rep]').forEach(function (b) {
           b.onclick = function () {
             rep = b.dataset.rep;
@@ -602,6 +637,7 @@
             m.querySelector('.edays').hidden = rep !== 'weekly';
             m.querySelector('.emday').hidden = rep !== 'monthly';
             m.querySelector('.edue').hidden = !!rep;
+            m.querySelector('.edo').hidden = !!rep;
           };
         });
         m.querySelectorAll('#e-days [data-day]').forEach(function (b) {
@@ -682,15 +718,15 @@
           t.time = time; t.dur = time ? +m.querySelector('#e-dur').value : 0;
           if (rep) {
             if (!isHabit(t)) { t.doneDates = {}; t.done = false; t.doneAt = 0; }   // タスクから習慣へ
-            t.repeat = rep; t.days = rep === 'weekly' ? sortDays(days) : []; t.due = '';
+            t.repeat = rep; t.days = rep === 'weekly' ? sortDays(days) : []; t.due = ''; t.doOn = '';
             var mdv = m.querySelector('#e-mday').value;
             if (rep === 'monthly') t.mday = mdv === 'last' ? 'last' : +mdv; else delete t.mday;
             // くり返しの決まりが変わったら、今回だけの変更は消す（もとの日が合わなくなるため）
             if (JSON.stringify([t.repeat, sortDays(t.days || []), t.mday || '']) !== beforeRule) t.moves = {};
           } else {
             if (isHabit(t)) { t.done = false; t.doneAt = 0; }                    // 習慣からタスクへ
-            t.repeat = ''; t.days = []; t.due = due.value || '';
-            if (t.time && !t.due) t.due = U.today();
+            t.repeat = ''; t.days = []; t.due = due.value || ''; t.doOn = doIn.value || '';
+            if (t.time && !t.doOn) t.doOn = U.today();                          // 時刻だけなら今日やる
           }
           Store.put(sp, 'task', t);
           closeModal(); renderAll();
@@ -719,7 +755,7 @@
       Store.list(sp, 'task').forEach(function (t) {
         if (isDev(t)) return;
         if (isHabit(t)) { if (onDay(t, iso)) out.push({ sp: sp, t: t, habit: true, done: habitDone(t, iso) }); }
-        else if (t.due === iso) out.push({ sp: sp, t: t, habit: false, done: !!t.done });
+        else if (planDay(t) === iso) out.push({ sp: sp, t: t, habit: false, done: !!t.done });
       });
     });
     return out;
@@ -855,7 +891,7 @@
           if (!title) { toast('やることを書いてください'); return; }
           if (!confirmWork(title, sp)) return;
           var time = m.querySelector('#s-time').value || (U.pad(hr) + ':00');
-          Store.put(sp, 'task', { title: title, prio: prio, due: iso, time: time, dur: +m.querySelector('#s-dur').value || 60,
+          Store.put(sp, 'task', { title: title, prio: prio, due: '', doOn: iso, time: time, dur: +m.querySelector('#s-dur').value || 60,
                                   note: '', done: false, repeat: '', days: [] });
           closeModal(); renderAll(); toast('予定を足しました');
         };
@@ -1123,6 +1159,13 @@
     document.getElementById('addPrio').addEventListener('click', function (e) {
       var b = e.target.closest('[data-prio]');
       if (b) { addPrio = b.dataset.prio; paintAddOpts(); }
+    });
+    document.getElementById('addDoPick').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-q]');
+      if (b) { addDo = quickDate(b.dataset.q); paintAddOpts(); }
+    });
+    document.getElementById('addDo').addEventListener('change', function (e) {
+      addDo = e.target.value || ''; paintAddOpts();
     });
     document.getElementById('addDuePick').addEventListener('click', function (e) {
       var b = e.target.closest('[data-q]');

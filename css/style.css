@@ -165,6 +165,11 @@ main{max-width:640px; margin:0 auto}
 .trow.done .ttl{color:var(--dim); text-decoration:line-through; text-decoration-color:color-mix(in srgb,var(--dim) 60%,transparent)}
 .tbody .sub{display:flex; gap:6px; margin-top:3px; flex-wrap:wrap}
 .due,.hasnote{font-size:11px; padding:0 7px; border-radius:999px; border:1px solid var(--line); color:var(--dim); line-height:1.7}
+.dob{font-size:11px; padding:0 7px; border-radius:999px; line-height:1.7; border:1px solid var(--accent); color:var(--accent)}
+.dob.now{background:var(--accent); color:var(--on); font-weight:700}
+.dob.late{border-color:var(--warn); color:var(--warn)}
+.trow.done .dob{display:none}
+.fact.todo{background:var(--accent); border-color:var(--accent); color:var(--on)}
 .due.soon{border-color:var(--accent); color:var(--accent)}
 .due.now{background:var(--warn); border-color:var(--warn); color:#fff; font-weight:700}
 .due.over{background:var(--danger); border-color:var(--danger); color:#fff; font-weight:700}
