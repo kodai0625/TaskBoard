@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=3860c01e">
+<link rel="stylesheet" href="css/style.css?v=0729f28a">
 </head>
 <body data-space="personal">
 
@@ -50,6 +50,27 @@
       <input type="text" id="taskInput" enterkeyhint="done" aria-label="タスクを足す">
       <button type="submit" class="addgo" aria-label="足す">＋</button>
     </form>
+    <!-- 足すときに決める重要度と期限（足したあとは「中・なし」に戻る） -->
+    <div class="addopts" id="taskOpts">
+      <div class="optrow">
+        <span class="optlbl">重要度</span>
+        <div class="seg3" id="addPrio">
+          <button type="button" data-prio="high">高</button>
+          <button type="button" data-prio="mid" class="on">中</button>
+          <button type="button" data-prio="low">低</button>
+        </div>
+      </div>
+      <div class="optrow">
+        <span class="optlbl">期限</span>
+        <div class="duepick" id="addDuePick">
+          <button type="button" class="chip on" data-q="">なし</button>
+          <button type="button" class="chip" data-q="0">今日</button>
+          <button type="button" class="chip" data-q="1">明日</button>
+          <button type="button" class="chip" data-q="we">週末</button>
+          <input type="date" id="addDue" aria-label="期限の日付">
+        </div>
+      </div>
+    </div>
     <div class="rule" id="taskRule"></div>
     <div id="taskList"></div>
   </section>
@@ -77,9 +98,9 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=3860c01e"></script>
-<script src="js/store.js?v=3860c01e"></script>
-<script src="js/sync.js?v=3860c01e"></script>
-<script src="js/app.js?v=3860c01e"></script>
+<script src="js/config.js?v=0729f28a"></script>
+<script src="js/store.js?v=0729f28a"></script>
+<script src="js/sync.js?v=0729f28a"></script>
+<script src="js/app.js?v=0729f28a"></script>
 </body>
 </html>

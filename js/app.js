@@ -31,6 +31,19 @@
     }
   };
 
+  /* ---------- 重要度（3段階）。印の無い前からのタスクは「中」として扱う ---------- */
+  var PRIO = { high: { label: '高', rank: 0 }, mid: { label: '中', rank: 1 }, low: { label: '低', rank: 2 } };
+  function prioOf(t) { return PRIO[t && t.prio] ? t.prio : 'mid'; }
+  function prioBadge(t) {
+    var p = prioOf(t);
+    return '<span class="prio p-' + p + '">重要度 ' + PRIO[p].label + '</span>';
+  }
+  function prioSeg(id, cur) {
+    return '<div class="seg3" id="' + id + '">' + ['high', 'mid', 'low'].map(function (p) {
+      return '<button type="button" data-prio="' + p + '"' + (p === cur ? ' class="on"' : '') + '>' + PRIO[p].label + '</button>';
+    }).join('') + '</div>';
+  }
+
   /** 期限の札。過ぎた・今日・明日を目立たせる */
   function dueBadge(due) {
     if (!due) return '';
@@ -171,15 +184,17 @@
   var showDone = false;
 
   function sortOpen(a, b) {
-    // 期限のあるものが先（近い順）。期限の無いものは新しい順
-    if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : (b.createdAt - a.createdAt);
-    if (a.due) return -1;
-    if (b.due) return 1;
-    return b.createdAt - a.createdAt;
+    // 期限のあるものが先（近い順）。同じ日の中と、期限の無いものの中は、重要度の高い順 → 新しい順
+    if (a.due && b.due && a.due !== b.due) return a.due < b.due ? -1 : 1;
+    if (a.due && !b.due) return -1;
+    if (!a.due && b.due) return 1;
+    var r = PRIO[prioOf(a)].rank - PRIO[prioOf(b)].rank;
+    if (r) return r;
+    return (b.createdAt || 0) - (a.createdAt || 0);
   }
 
   function taskRow(t) {
-    var sub = dueBadge(t.due) + (t.note ? '<span class="hasnote">メモあり</span>' : '');
+    var sub = prioBadge(t) + dueBadge(t.due) + (t.note ? '<span class="hasnote">メモあり</span>' : '');
     return '<div class="trow' + (t.done ? ' done' : '') + '" data-id="' + U.esc(t.id) + '">'
       + '<button type="button" class="ck" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
@@ -215,11 +230,34 @@
     document.getElementById('taskList').innerHTML = h;
   }
 
+  /* ---------- 足すときに決める重要度と期限 ---------- */
+  var addPrio = 'mid', addDue = '';
+
+  function quickDate(q) {
+    if (q === '') return '';
+    return U.addDays(q === 'we' ? weekendOffset() : Number(q));
+  }
+
+  function paintAddOpts() {
+    document.querySelectorAll('#addPrio [data-prio]').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.prio === addPrio);
+    });
+    var hit = false;
+    document.querySelectorAll('#addDuePick [data-q]').forEach(function (b) {
+      var on = !hit && quickDate(b.dataset.q) === addDue;
+      if (on) hit = true;                 // 今日が土曜なら「今日」と「週末」が同じ日になる。先の方だけ光らせる
+      b.classList.toggle('on', on);
+    });
+    document.getElementById('addDue').value = addDue;
+  }
+
   function addTask(title) {
     title = title.trim();
     if (!title) return false;
     if (!confirmWork(title)) return false;
-    Store.put(space(), 'task', { title: title, due: '', note: '', done: false });
+    Store.put(space(), 'task', { title: title, due: addDue, prio: addPrio, note: '', done: false });
+    addPrio = 'mid'; addDue = '';        // 足したら元に戻す
+    paintAddOpts();
     renderAll();
     return true;
   }
@@ -251,6 +289,7 @@
     modal(
       '<h2>' + U.esc(label(sp)) + 'のタスク</h2>'
       + '<div class="f"><label for="e-title">やること</label><input type="text" id="e-title" value="' + U.esc(t.title) + '"></div>'
+      + '<div class="f"><label>重要度</label>' + prioSeg('e-prio', prioOf(t)) + '</div>'
       + '<div class="f"><label for="e-due">期限</label>'
       + '<div class="f2"><input type="date" id="e-due" value="' + U.esc(t.due || '') + '">'
       + '<button type="button" class="mini" data-due="">なし</button></div>'
@@ -267,6 +306,13 @@
       + '</div>',
       function (m) {
         var due = m.querySelector('#e-due');
+        var prio = prioOf(t);
+        m.querySelectorAll('#e-prio [data-prio]').forEach(function (b) {
+          b.onclick = function () {
+            prio = b.dataset.prio;
+            m.querySelectorAll('#e-prio [data-prio]').forEach(function (x) { x.classList.toggle('on', x === b); });
+          };
+        });
         m.querySelectorAll('[data-due]').forEach(function (b) {
           b.onclick = function () { due.value = b.dataset.due; };
         });
@@ -287,7 +333,7 @@
           var note = m.querySelector('#e-note').value.trim();
           if (!title) { toast('やることが空です'); return; }
           if (!confirmWork(title + '\n' + note)) return;
-          t.title = title; t.due = due.value || ''; t.note = note;
+          t.title = title; t.due = due.value || ''; t.note = note; t.prio = prio;
           Store.put(sp, 'task', t);
           closeModal(); renderAll();
         };
@@ -355,7 +401,7 @@
           var text = m.querySelector('#m-text').value.trim();
           if (!text) return;
           var lines = text.split('\n');
-          Store.put(sp, 'task', { title: lines[0].trim(), due: '', note: lines.slice(1).join('\n').trim(), done: false });
+          Store.put(sp, 'task', { title: lines[0].trim(), due: '', prio: 'mid', note: lines.slice(1).join('\n').trim(), done: false });
           Store.remove(sp, 'memo', id);
           closeModal();
           show('task');
@@ -553,6 +599,17 @@
     });
     document.getElementById('setBtn').onclick = function () { show(view === 'set' ? lastView : 'set'); };
 
+    document.getElementById('addPrio').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-prio]');
+      if (b) { addPrio = b.dataset.prio; paintAddOpts(); }
+    });
+    document.getElementById('addDuePick').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-q]');
+      if (b) { addDue = quickDate(b.dataset.q); paintAddOpts(); }
+    });
+    document.getElementById('addDue').addEventListener('change', function (e) {
+      addDue = e.target.value || ''; paintAddOpts();
+    });
     var taskInput = document.getElementById('taskInput');
     document.getElementById('taskForm').addEventListener('submit', function (e) {
       e.preventDefault();
