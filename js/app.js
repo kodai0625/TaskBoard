@@ -54,6 +54,8 @@
        repeat: 'daily'（毎日）| 'weekly'（毎週）| 'monthly'（毎月。2026-09-29〜）
        days: [0..6]（毎週のときの曜日。0=日）
        mday: 1〜31 か 'last'（毎月のときの日付。その月に無い日は、その月の最後の日にする）
+       moves: {'もとの日': '動かした先の日'}（今回だけ日を変えた回。先が '' ならその回はお休み。2026-09-29〜）
+         ★決まり（曜日・日付）はそのまま。済み（doneDates）は動かした先の日で付く
        doneDates: {'YYYY-MM-DD': 済んだ時刻}（日ごとの済み。120日より前は捨てる）
      時刻は task にも習慣にも付けられる。time: 'HH:MM'、dur: 長さ（分） */
   var DURS = [15, 30, 45, 60, 90, 120, 180];
@@ -64,11 +66,47 @@
     return h.mday === 'last' ? last : Math.min(Number(h.mday) || 1, last);
   }
   function sortDays(ds) { return (ds || []).slice().sort(function (a, b) { return ((a + 6) % 7) - ((b + 6) % 7); }); }   // 月はじまり
-  function onDay(h, iso) {
+  /** 決まりどおりならその日にやるか（今回だけの変更は見ない） */
+  function baseOn(h, iso) {
     var d = U.parse(iso);
     if (h.repeat === 'daily') return true;
     if (h.repeat === 'monthly') return d.getDate() === mdayIn(h, d.getFullYear(), d.getMonth());
     return (h.days || []).indexOf(d.getDay()) >= 0;
+  }
+  /** 実際にその日にやるか（今回だけ動かした・休んだ回を入れて） */
+  function onDay(h, iso) {
+    var mv = h.moves || {};
+    if (Object.prototype.hasOwnProperty.call(mv, iso)) return false;   // この日の回は、よそへ動かした（か休み）
+    if (movedFrom(h, iso)) return true;                                   // よその回を、この日に動かした
+    return baseOn(h, iso);
+  }
+  /** この日に動かしてきた回の、もとの日（無ければ ''） */
+  function movedFrom(h, iso) {
+    var mv = h.moves || {};
+    for (var k in mv) if (Object.prototype.hasOwnProperty.call(mv, k) && mv[k] === iso) return k;
+    return '';
+  }
+  /** 決まりどおりの回を、fromIso から先へ n 回まで */
+  function baseUpcoming(h, fromIso, n) {
+    var out = [], d = U.parse(fromIso), days = h.repeat === 'monthly' ? 100 : 45;
+    for (var i = 0; i <= days && out.length < n; i++) {
+      var iso = U.iso(d);
+      if (baseOn(h, iso)) out.push(iso);
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }
+  /** 今回だけ動かす（to が '' ならお休み。to がもとの日なら元に戻す） */
+  function setMove(sp, id, orig, to) {
+    var h = Store.get(sp, 'task', id);
+    if (!h || !isHabit(h)) return;
+    var mv = h.moves || {};
+    if (to === orig || to === null) delete mv[orig]; else mv[orig] = to;
+    var edge = U.iso(new Date(Date.now() - 120 * 86400000));
+    Object.keys(mv).forEach(function (k) { if (k < edge && (!mv[k] || mv[k] < edge)) delete mv[k]; });
+    h.moves = mv;
+    Store.put(sp, 'task', h);
+    renderAll();
   }
   /** 次にやる日（今日より後。見つからなければ ''） */
   function nextOn(h, iso) {
@@ -341,7 +379,9 @@
   function habitRow(h, iso) {
     var done = habitDone(h, iso);
     var nx = onDay(h, iso) ? '' : nextOn(h, iso);
+    var from = onDay(h, iso) ? movedFrom(h, iso) : '';
     var sub = '<span class="reptag">↻ ' + U.esc(repeatLabel(h)) + '</span>'
+      + (from ? '<span class="movetag">↪ ' + U.md(from) + 'の分</span>' : '')
       + (nx ? '<span class="due">次は ' + U.md(nx) + '</span>' : '')
       + (h.time ? '<span class="due">' + timeLabel(h) + '</span>' : '') + prioBadge(h);
     return '<div class="trow habit' + (done ? ' done' : '') + '" data-id="' + U.esc(h.id) + '" data-prio="' + prioOf(h) + '">'
@@ -504,12 +544,13 @@
     }
   }
 
-  function editTask(id, spIn) {
+  function editTask(id, spIn, ctxIso) {
     var sp = spIn || space();
     var t = Store.get(sp, 'task', id);
     if (!t) return;
     if (isDev(t)) { viewDev(id); return; } // 写しは直さない。見るだけ
     var rep = isHabit(t) ? t.repeat : '';
+    var beforeRule = JSON.stringify([t.repeat || '', sortDays(t.days || []), t.mday || '']);
     var quick = [['今日', 0], ['明日', 1], ['週末', weekendOffset()], ['1週間後', 7]];
     modal(
       '<h2>' + U.esc(label(sp)) + 'の' + (rep ? '習慣' : 'タスク') + '</h2>'
@@ -521,7 +562,9 @@
         }).join('') + '</div>'
       + '<div class="edays"' + (rep === 'weekly' ? '' : ' hidden') + '>' + daysPicker('e-days', t.days || [new Date().getDay()]) + '</div>'
       + '<div class="emday"' + (rep === 'monthly' ? '' : ' hidden') + '><div class="timepick">毎月 <select id="e-mday">'
-      + mdayOptions(t.mday || (t.due ? U.parse(t.due).getDate() : new Date().getDate())) + '</select></div></div></div>'
+      + mdayOptions(t.mday || (t.due ? U.parse(t.due).getDate() : new Date().getDate())) + '</select></div></div>'
+      + (rep ? '<div class="hint rulehint">くり返しの決まりを変えると、「今回だけ」の変更は消えます</div>' : '') + '</div>'
+      + (rep ? '<div class="f emove"><label>今回だけ日を変える</label><div class="mvbox"></div></div>' : '')
       + '<div class="f"><label for="e-time">時刻と長さ</label><div class="f2">'
       + '<input type="time" id="e-time" step="300" value="' + U.esc(t.time || '') + '">'
       + '<select id="e-dur">' + durOptions(Number(t.dur) || 30) + '</select>'
@@ -565,6 +608,55 @@
           b.onclick = function () { b.classList.toggle('on'); };
         });
         m.querySelector('#e-notime').onclick = function () { m.querySelector('#e-time').value = ''; };
+        // 今回だけ日を変える（押したらすぐ残す。「直す」を押さなくてよい）
+        var box = m.querySelector('.mvbox');
+        var pick = '';
+        function paintMoves() {
+          if (!box) return;
+          var cur = Store.get(sp, 'task', id) || t;
+          var mv = cur.moves || {};
+          var today = U.today();
+          var occ = baseUpcoming(cur, today, 12);
+          Object.keys(mv).forEach(function (k) { if (k >= today && occ.indexOf(k) < 0) occ.push(k); });
+          occ.sort();
+          if (!pick) {
+            var from = ctxIso ? (movedFrom(cur, ctxIso) || (baseOn(cur, ctxIso) ? ctxIso : '')) : '';
+            pick = from && occ.indexOf(from) >= 0 ? from : (occ[0] || '');
+          }
+          var opt = occ.map(function (o) {
+            var to = Object.prototype.hasOwnProperty.call(mv, o) ? mv[o] : null;
+            return '<option value="' + o + '"' + (o === pick ? ' selected' : '') + '>' + U.md(o) + 'の分'
+              + (to === null ? '' : to ? '（→ ' + U.md(to) + ' に移し中）' : '（お休み中）') + '</option>';
+          }).join('');
+          var moved = Object.keys(mv).filter(function (k) { return k >= today || (mv[k] && mv[k] >= today); }).sort();
+          var pickedTo = Object.prototype.hasOwnProperty.call(mv, pick) ? mv[pick] : null;
+          box.innerHTML = occ.length
+            ? '<div class="f2"><select id="e-occ">' + opt + '</select></div>'
+              + '<div class="f2 mvrow"><input type="date" id="e-mvto" value="' + (pickedTo || pick) + '" min="' + today + '">'
+              + '<button type="button" class="mini go2" id="e-mv">この日に移す</button>'
+              + '<button type="button" class="mini" id="e-skip">この回は休む</button></div>'
+              + (moved.length ? '<div class="mvlist">' + moved.map(function (k) {
+                  return '<div class="mvitem"><span>' + U.md(k) + 'の分 → <b>' + (mv[k] ? U.md(mv[k]) : 'お休み') + '</b></span>'
+                    + '<button type="button" class="mini" data-undo="' + k + '">元に戻す</button></div>';
+                }).join('') + '</div>' : '<div class="hint">動かしている回はありません</div>')
+            : '<div class="hint">この先の回が見つかりません</div>';
+          var sel = box.querySelector('#e-occ');
+          if (sel) sel.onchange = function () { pick = sel.value; paintMoves(); };
+          var mvb = box.querySelector('#e-mv');
+          if (mvb) mvb.onclick = function () {
+            var to = box.querySelector('#e-mvto').value;
+            if (!to) { toast('移す日を選んでください'); return; }
+            setMove(sp, id, pick, to);
+            toast(to === pick ? U.md(pick) + 'の分を元に戻しました' : U.md(pick) + 'の分を ' + U.md(to) + ' に移しました');
+            paintMoves();
+          };
+          var sk = box.querySelector('#e-skip');
+          if (sk) sk.onclick = function () { setMove(sp, id, pick, ''); toast(U.md(pick) + 'の分はお休みにしました'); paintMoves(); };
+          box.querySelectorAll('[data-undo]').forEach(function (b) {
+            b.onclick = function () { setMove(sp, id, b.dataset.undo, null); toast(U.md(b.dataset.undo) + 'の分を元に戻しました'); paintMoves(); };
+          });
+        }
+        paintMoves();
         m.querySelector('#e-cancel').onclick = closeModal;
         m.querySelector('#e-del').onclick = function () {
           Store.remove(sp, 'task', id);
@@ -591,8 +683,10 @@
           if (rep) {
             if (!isHabit(t)) { t.doneDates = {}; t.done = false; t.doneAt = 0; }   // タスクから習慣へ
             t.repeat = rep; t.days = rep === 'weekly' ? sortDays(days) : []; t.due = '';
-            var mv = m.querySelector('#e-mday').value;
-            if (rep === 'monthly') t.mday = mv === 'last' ? 'last' : +mv; else delete t.mday;
+            var mdv = m.querySelector('#e-mday').value;
+            if (rep === 'monthly') t.mday = mdv === 'last' ? 'last' : +mdv; else delete t.mday;
+            // くり返しの決まりが変わったら、今回だけの変更は消す（もとの日が合わなくなるため）
+            if (JSON.stringify([t.repeat, sortDays(t.days || []), t.mday || '']) !== beforeRule) t.moves = {};
           } else {
             if (isHabit(t)) { t.done = false; t.doneAt = 0; }                    // 習慣からタスクへ
             t.repeat = ''; t.days = []; t.due = due.value || '';
@@ -690,7 +784,9 @@
               + planCheck(x).replace('class="ck"', 'class="ck"')
               + '<button type="button" class="tbody" data-act="pedit"><span class="ttl">' + U.esc(x.t.title) + '</span>'
               + '<span class="sub"><span class="sptag ' + x.sp + '">' + label(x.sp) + '</span>'
-              + (x.habit ? '<span class="reptag">↻ ' + U.esc(repeatLabel(x.t)) + '</span>' : '') + prioBadge(x.t) + '</span></button></div>';
+              + (x.habit ? '<span class="reptag">↻ ' + U.esc(repeatLabel(x.t)) + '</span>' : '')
+              + (x.habit && movedFrom(x.t, iso) ? '<span class="movetag">↪ ' + U.md(movedFrom(x.t, iso)) + 'の分</span>' : '')
+              + prioBadge(x.t) + '</span></button></div>';
           }).join('') + '</div>';
     }
 
@@ -716,7 +812,7 @@
         + planCheck(x)
         + '<button type="button" class="evbody" data-act="pedit">'
         + '<span class="evt">' + U.esc(x.t.title) + '</span>'
-        + '<span class="evs">' + timeLabel(x.t) + (x.habit ? ' ・↻' : '') + '</span>'
+        + '<span class="evs">' + timeLabel(x.t) + (x.habit ? ' ・↻' : '') + (x.habit && movedFrom(x.t, iso) ? ' ・↪移した' : '') + '</span>'
         + '</button></div>';
     });
     if (iso === today) {
@@ -1070,7 +1166,7 @@
       if (!row) return;
       var sp = row.dataset.sp, id = row.dataset.id, t = Store.get(sp, 'task', id);
       if (!t) return;
-      if (b.dataset.act === 'pedit') { editTask(id, sp); return; }
+      if (b.dataset.act === 'pedit') { editTask(id, sp, planDate || U.today()); return; }
       if (b.dataset.act === 'ptoggle') {
         if (isHabit(t)) toggleHabit(sp, id, planDate || U.today());
         else toggleTask(id, sp);

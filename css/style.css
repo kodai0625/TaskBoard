@@ -353,6 +353,15 @@ main{max-width:640px; margin:0 auto}
 .optrow.off{opacity:.35; pointer-events:none}
 .modal .days button{width:36px; height:36px; font-size:14px}
 .edays,.emday{margin-top:8px}
+.rulehint{margin:6px 0 0}
+.movetag{font-size:11px; padding:0 7px; border-radius:999px; line-height:1.7; border:1px dashed var(--gold); color:var(--ink)}
+.emove .mvbox{display:flex; flex-direction:column; gap:8px; padding:10px; border:1px dashed var(--gold); border-radius:10px; background:var(--gold-soft)}
+.emove select{width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); font-size:15px}
+.mvrow{flex-wrap:wrap} .mvrow input[type=date]{flex:1 1 150px}
+.mini.go2{background:var(--gold); border-color:var(--gold); color:#2a2433; font-weight:700}
+.mvlist{display:flex; flex-direction:column; gap:4px}
+.mvitem{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; padding:6px 8px; background:var(--card); border-radius:8px; border:1px solid var(--line)}
+.ev .evs{overflow:hidden; text-overflow:ellipsis}
 .timepick select#addMday,.emday select{border:1px solid var(--line); border-radius:999px; background:var(--card); color:var(--ink); padding:3px 10px; font-size:13px; height:29px}
 .modal .emday select{height:36px; font-size:15px}
 
