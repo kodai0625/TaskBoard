@@ -352,7 +352,9 @@ main{max-width:640px; margin:0 auto}
 .hint2:empty{display:none}
 .optrow.off{opacity:.35; pointer-events:none}
 .modal .days button{width:36px; height:36px; font-size:14px}
-.edays{margin-top:8px}
+.edays,.emday{margin-top:8px}
+.timepick select#addMday,.emday select{border:1px solid var(--line); border-radius:999px; background:var(--card); color:var(--ink); padding:3px 10px; font-size:13px; height:29px}
+.modal .emday select{height:36px; font-size:15px}
 
 /* 習慣のまとまり */
 .habithead{display:flex; align-items:baseline; gap:8px; margin:14px 4px 6px; font-size:13.5px; font-weight:700}

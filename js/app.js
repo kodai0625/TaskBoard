@@ -51,16 +51,41 @@
 
   /* ---------- 習慣（くり返すタスク）と時刻（2026-09-29） ----------
      習慣は「repeat の付いた task」として持つ（受け口の GAS は task と memo しか受けないので、貼り直し不要）。
-       repeat: 'daily'（毎日）| 'weekly'（毎週）、days: [0..6]（毎週のときの曜日。0=日）
+       repeat: 'daily'（毎日）| 'weekly'（毎週）| 'monthly'（毎月。2026-09-29〜）
+       days: [0..6]（毎週のときの曜日。0=日）
+       mday: 1〜31 か 'last'（毎月のときの日付。その月に無い日は、その月の最後の日にする）
        doneDates: {'YYYY-MM-DD': 済んだ時刻}（日ごとの済み。120日より前は捨てる）
      時刻は task にも習慣にも付けられる。time: 'HH:MM'、dur: 長さ（分） */
   var DURS = [15, 30, 45, 60, 90, 120, 180];
-  function isHabit(t) { return !!(t && (t.repeat === 'daily' || t.repeat === 'weekly')); }
+  function isHabit(t) { return !!(t && (t.repeat === 'daily' || t.repeat === 'weekly' || t.repeat === 'monthly')); }
+  /** 毎月の習慣が、その月の何日にあたるか（無い日はその月の最後の日） */
+  function mdayIn(h, y, m) {
+    var last = new Date(y, m + 1, 0).getDate();
+    return h.mday === 'last' ? last : Math.min(Number(h.mday) || 1, last);
+  }
   function sortDays(ds) { return (ds || []).slice().sort(function (a, b) { return ((a + 6) % 7) - ((b + 6) % 7); }); }   // 月はじまり
-  function onDay(h, iso) { return h.repeat === 'daily' || (h.days || []).indexOf(U.parse(iso).getDay()) >= 0; }
+  function onDay(h, iso) {
+    var d = U.parse(iso);
+    if (h.repeat === 'daily') return true;
+    if (h.repeat === 'monthly') return d.getDate() === mdayIn(h, d.getFullYear(), d.getMonth());
+    return (h.days || []).indexOf(d.getDay()) >= 0;
+  }
+  /** 次にやる日（今日より後。見つからなければ ''） */
+  function nextOn(h, iso) {
+    var d = U.parse(iso);
+    for (var i = 1; i <= 62; i++) { d.setDate(d.getDate() + 1); if (onDay(h, U.iso(d))) return U.iso(d); }
+    return '';
+  }
+  function mdayLabel(v) { return v === 'last' ? '月末' : v + '日'; }
+  function mdayOptions(cur) {
+    var o = '';
+    for (var i = 1; i <= 31; i++) o += '<option value="' + i + '"' + (String(cur) === String(i) ? ' selected' : '') + '>' + i + '日</option>';
+    return o + '<option value="last"' + (cur === 'last' ? ' selected' : '') + '>月末</option>';
+  }
   function habitDone(h, iso) { return !!(h.doneDates && h.doneDates[iso]); }
   function repeatLabel(h) {
     if (h.repeat === 'daily') return '毎日';
+    if (h.repeat === 'monthly') return '毎月 ' + mdayLabel(h.mday || 1);
     var ds = sortDays(h.days);
     return ds.length === 7 ? '毎日' : '毎週 ' + ds.map(function (d) { return DOW[d]; }).join('・');
   }
@@ -315,7 +340,9 @@
 
   function habitRow(h, iso) {
     var done = habitDone(h, iso);
+    var nx = onDay(h, iso) ? '' : nextOn(h, iso);
     var sub = '<span class="reptag">↻ ' + U.esc(repeatLabel(h)) + '</span>'
+      + (nx ? '<span class="due">次は ' + U.md(nx) + '</span>' : '')
       + (h.time ? '<span class="due">' + timeLabel(h) + '</span>' : '') + prioBadge(h);
     return '<div class="trow habit' + (done ? ' done' : '') + '" data-id="' + U.esc(h.id) + '" data-prio="' + prioOf(h) + '">'
       + '<button type="button" class="ck" data-act="htoggle" aria-label="' + (done ? '今日の済みを取り消す' : '今日は済み') + '">'
@@ -400,7 +427,7 @@
 
   /* ---------- 足すときに決める重要度と期限 ---------- */
   var addPrio = 'mid', addDue = '';
-  var addTime = '', addDur = 30, addRepeat = '', addDaysSel = [], moreOpen = false;
+  var addTime = '', addDur = 30, addRepeat = '', addDaysSel = [], addMday = '', moreOpen = false;
 
   function quickDate(q) {
     if (q === '') return '';
@@ -421,17 +448,20 @@
     // 時刻・くり返し
     document.getElementById('addMore').hidden = !moreOpen;
     document.getElementById('addMoreBtn').textContent = (moreOpen ? '▾' : '▸') + ' 時刻・くり返し'
-      + (addTime || addRepeat ? '（' + [addTime, addRepeat === 'daily' ? '毎日' : addRepeat === 'weekly' ? '毎週' : ''].filter(Boolean).join('・') + '）' : '');
+      + (addTime || addRepeat ? '（' + [addTime, { daily: '毎日', weekly: '毎週', monthly: '毎月 ' + mdayLabel(addMday || new Date().getDate()) }[addRepeat] || ''].filter(Boolean).join('・') + '）' : '');
     document.getElementById('addTime').value = addTime;
     document.getElementById('addDur').innerHTML = durOptions(addDur);
     document.getElementById('addDur').disabled = !addTime;
     document.querySelectorAll('#addRepeat [data-rep]').forEach(function (b) { b.classList.toggle('on', b.dataset.rep === addRepeat); });
     document.getElementById('addDaysRow').hidden = addRepeat !== 'weekly';
+    document.getElementById('addMdayRow').hidden = addRepeat !== 'monthly';
+    document.getElementById('addMday').innerHTML = mdayOptions(addMday || new Date().getDate());
     document.getElementById('addDays').outerHTML = daysPicker('addDays', addDaysSel);
     // くり返すときは期限を使わない（毎日・毎週その日の分がある）
     document.querySelector('#taskOpts .optrow:nth-child(2)').classList.toggle('off', !!addRepeat);
     document.getElementById('addMoreHint').textContent = addRepeat
       ? '習慣として足します。期限は使いません。済みは日ごとに付けます'
+        + (addRepeat === 'monthly' ? '（その月に無い日は、その月の最後の日にします）' : '')
       : (addTime && !addDue ? '期限が無いので、今日の予定として足します' : '');
   }
 
@@ -443,12 +473,13 @@
     var rec = { title: title, due: addRepeat ? '' : addDue, prio: addPrio, note: '', done: false,
                 time: addTime, dur: addTime ? addDur : 0, repeat: addRepeat,
                 days: addRepeat === 'weekly' ? sortDays(addDaysSel) : [] };
+    if (addRepeat === 'monthly') rec.mday = addMday || new Date().getDate();
     if (rec.time && !rec.repeat && !rec.due) rec.due = U.today();     // 時刻だけ決めたら今日の予定
     if (rec.repeat) rec.doneDates = {};
     Store.put(space(), 'task', rec);
     toast(rec.repeat ? '習慣を足しました（' + repeatLabel(rec) + '）' : 'タスクを足しました');
     addPrio = 'mid'; addDue = '';        // 足したら元に戻す
-    addTime = ''; addDur = 30; addRepeat = ''; addDaysSel = [];
+    addTime = ''; addDur = 30; addRepeat = ''; addDaysSel = []; addMday = '';
     paintAddOpts();
     renderAll();
     return true;
@@ -485,10 +516,12 @@
       + '<div class="f"><label for="e-title">やること</label><input type="text" id="e-title" value="' + U.esc(t.title) + '"></div>'
       + '<div class="f"><label>重要度</label>' + prioSeg('e-prio', prioOf(t)) + '</div>'
       + '<div class="f"><label>くり返し</label><div class="seg3 rep" id="e-rep">'
-      + [['', 'なし'], ['daily', '毎日'], ['weekly', '毎週']].map(function (r) {
+      + [['', 'なし'], ['daily', '毎日'], ['weekly', '毎週'], ['monthly', '毎月']].map(function (r) {
           return '<button type="button" data-rep="' + r[0] + '"' + (r[0] === rep ? ' class="on"' : '') + '>' + r[1] + '</button>';
         }).join('') + '</div>'
-      + '<div class="edays"' + (rep === 'weekly' ? '' : ' hidden') + '>' + daysPicker('e-days', t.days || [new Date().getDay()]) + '</div></div>'
+      + '<div class="edays"' + (rep === 'weekly' ? '' : ' hidden') + '>' + daysPicker('e-days', t.days || [new Date().getDay()]) + '</div>'
+      + '<div class="emday"' + (rep === 'monthly' ? '' : ' hidden') + '><div class="timepick">毎月 <select id="e-mday">'
+      + mdayOptions(t.mday || (t.due ? U.parse(t.due).getDate() : new Date().getDate())) + '</select></div></div></div>'
       + '<div class="f"><label for="e-time">時刻と長さ</label><div class="f2">'
       + '<input type="time" id="e-time" step="300" value="' + U.esc(t.time || '') + '">'
       + '<select id="e-dur">' + durOptions(Number(t.dur) || 30) + '</select>'
@@ -524,6 +557,7 @@
             rep = b.dataset.rep;
             m.querySelectorAll('#e-rep [data-rep]').forEach(function (x) { x.classList.toggle('on', x === b); });
             m.querySelector('.edays').hidden = rep !== 'weekly';
+            m.querySelector('.emday').hidden = rep !== 'monthly';
             m.querySelector('.edue').hidden = !!rep;
           };
         });
@@ -557,6 +591,8 @@
           if (rep) {
             if (!isHabit(t)) { t.doneDates = {}; t.done = false; t.doneAt = 0; }   // タスクから習慣へ
             t.repeat = rep; t.days = rep === 'weekly' ? sortDays(days) : []; t.due = '';
+            var mv = m.querySelector('#e-mday').value;
+            if (rep === 'monthly') t.mday = mv === 'last' ? 'last' : +mv; else delete t.mday;
           } else {
             if (isHabit(t)) { t.done = false; t.doneAt = 0; }                    // 習慣からタスクへ
             t.repeat = ''; t.days = []; t.due = due.value || '';
@@ -1008,6 +1044,9 @@
       addRepeat = b.dataset.rep;
       if (addRepeat === 'weekly' && !addDaysSel.length) addDaysSel = [new Date().getDay()];
       paintAddOpts();
+    });
+    document.getElementById('addMday').addEventListener('change', function (e) {
+      addMday = e.target.value === 'last' ? 'last' : +e.target.value; paintAddOpts();
     });
     document.getElementById('addDaysRow').addEventListener('click', function (e) {
       var b = e.target.closest('[data-day]');

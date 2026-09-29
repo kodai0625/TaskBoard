@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=11d84d30">
+<link rel="stylesheet" href="css/style.css?v=8ed59f7a">
 </head>
 <body data-space="personal">
 
@@ -87,7 +87,12 @@
             <button type="button" data-rep="" class="on">なし</button>
             <button type="button" data-rep="daily">毎日</button>
             <button type="button" data-rep="weekly">毎週</button>
+            <button type="button" data-rep="monthly">毎月</button>
           </div>
+        </div>
+        <div class="optrow" id="addMdayRow" hidden>
+          <span class="optlbl">日付</span>
+          <div class="timepick">毎月 <select id="addMday" aria-label="毎月の日付"></select></div>
         </div>
         <div class="optrow" id="addDaysRow" hidden>
           <span class="optlbl">曜日</span>
@@ -134,9 +139,9 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=11d84d30"></script>
-<script src="js/store.js?v=11d84d30"></script>
-<script src="js/sync.js?v=11d84d30"></script>
-<script src="js/app.js?v=11d84d30"></script>
+<script src="js/config.js?v=8ed59f7a"></script>
+<script src="js/store.js?v=8ed59f7a"></script>
+<script src="js/sync.js?v=8ed59f7a"></script>
+<script src="js/app.js?v=8ed59f7a"></script>
 </body>
 </html>
