@@ -23,6 +23,10 @@
      ときどき 404 を返します（2026-09-26 に本物で6回に1回ほど）。
      受け口の仕事は済んでいるので、同じものをもう一度送って大丈夫です
      （書き込みは id ごとの上書きなので、2回届いても1行のまま）。2回まで黙って送り直します */
+  /* ★ok でも答えの形が違う返事がまれに来る（2026-09-29、Mac の書き出しの記録で2回）。
+     受け取らずに「同期ずみ」にしないよう、動きごとに要るものを見て、無ければ送り直します */
+  var NEED = { ping: 'now', pull: 'rows', push: 'applied' };
+
   function post(u, payload, tries) {
     tries = tries || 0;
     return fetch(u, {
@@ -33,6 +37,8 @@
     }).then(function (r) { return r.text(); }).then(function (t) {
       var obj = null;
       try { obj = JSON.parse(t); } catch (e) { obj = null; }
+      var need = NEED[payload.action];
+      if (obj && obj.ok && need && !(need in obj)) obj = null;   // 形が違う返事は、読めなかったのと同じに扱う
       if (!obj) {
         if (tries < 2) return wait(800 * (tries + 1)).then(function () { return post(u, payload, tries + 1); });
         throw new Error('返事が読めません（URLがウェブアプリのものか確かめてください）');
