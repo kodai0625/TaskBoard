@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=c3345a06">
+<link rel="stylesheet" href="css/style.css?v=11d84d30">
 </head>
 <body data-space="personal">
 
@@ -38,6 +38,7 @@
 
   <nav class="tabs" id="tabs">
     <button type="button" class="tab on" data-view="task">タスク <span class="cnt" id="cntTask"></span></button>
+    <button type="button" class="tab" data-view="plan">予定</button>
     <button type="button" class="tab" data-view="memo">メモ <span class="cnt" id="cntMemo"></span></button>
   </nav>
 </header>
@@ -71,9 +72,43 @@
           <input type="date" id="addDue" aria-label="期限の日付">
         </div>
       </div>
+      <button type="button" class="moreopt" id="addMoreBtn">▸ 時刻・くり返し</button>
+      <div class="more" id="addMore" hidden>
+        <div class="optrow">
+          <span class="optlbl">時刻</span>
+          <div class="timepick">
+            <input type="time" id="addTime" step="300" aria-label="始まる時刻">
+            <select id="addDur" aria-label="長さ"></select>
+          </div>
+        </div>
+        <div class="optrow">
+          <span class="optlbl">くり返し</span>
+          <div class="seg3 rep" id="addRepeat">
+            <button type="button" data-rep="" class="on">なし</button>
+            <button type="button" data-rep="daily">毎日</button>
+            <button type="button" data-rep="weekly">毎週</button>
+          </div>
+        </div>
+        <div class="optrow" id="addDaysRow" hidden>
+          <span class="optlbl">曜日</span>
+          <div class="days" id="addDays"></div>
+        </div>
+        <div class="hint2" id="addMoreHint"></div>
+      </div>
     </div>
     <div class="rule" id="taskRule"></div>
     <div id="taskList"></div>
+  </section>
+
+  <!-- ============ 予定（その日のタイムテーブル） ============ -->
+  <section id="view-plan" class="view">
+    <div class="plannav">
+      <button type="button" class="nav" id="planPrev" aria-label="前の日">‹</button>
+      <div class="plandate" id="planDate"></div>
+      <button type="button" class="nav" id="planNext" aria-label="次の日">›</button>
+      <button type="button" class="mini" id="planToday">今日</button>
+    </div>
+    <div id="planBody"></div>
   </section>
 
   <!-- ============ メモ ============ -->
@@ -99,9 +134,9 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=c3345a06"></script>
-<script src="js/store.js?v=c3345a06"></script>
-<script src="js/sync.js?v=c3345a06"></script>
-<script src="js/app.js?v=c3345a06"></script>
+<script src="js/config.js?v=11d84d30"></script>
+<script src="js/store.js?v=11d84d30"></script>
+<script src="js/sync.js?v=11d84d30"></script>
+<script src="js/app.js?v=11d84d30"></script>
 </body>
 </html>

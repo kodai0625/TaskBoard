@@ -67,7 +67,7 @@
     SPACES.forEach(function (sp) { delete metas[sp].url; delete metas[sp].pin; });
     ui = read(KEY_UI, null) || {};
     if (SPACES.indexOf(ui.space) < 0) ui.space = 'personal';
-    if (['task', 'memo'].indexOf(ui.view) < 0) ui.view = 'task';
+    if (['task', 'plan', 'memo'].indexOf(ui.view) < 0) ui.view = 'task';
   }
 
   function save(space) { write(key(space), bags[space]); }

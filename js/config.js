@@ -9,7 +9,7 @@
    合言葉（PIN）はどこにも書きません。端末ごとに設定画面で入れます。 */
 var APP = {
   name: 'Task Board',
-  version: 'c3345a06',
+  version: '11d84d30',
   autoSyncSec: 60,     // 何秒ごとに自動で同期するか
   syncUrl: 'https://script.google.com/macros/s/AKfycbyCXB8h9EcN_OLbhXscTN8nXq9ihGrU2ev704vxz0iBXT0bXQv70dAzIXtRlTqqUlmRYQ/exec',
   spaces: {

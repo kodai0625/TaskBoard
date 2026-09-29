@@ -49,6 +49,48 @@
      （やっても次の回に元に戻るため）。押すと全文を見るだけ */
   function isDev(t) { return t && (t.src === 'dev' || String(t.id || '').indexOf('dev-') === 0); }
 
+  /* ---------- 習慣（くり返すタスク）と時刻（2026-09-29） ----------
+     習慣は「repeat の付いた task」として持つ（受け口の GAS は task と memo しか受けないので、貼り直し不要）。
+       repeat: 'daily'（毎日）| 'weekly'（毎週）、days: [0..6]（毎週のときの曜日。0=日）
+       doneDates: {'YYYY-MM-DD': 済んだ時刻}（日ごとの済み。120日より前は捨てる）
+     時刻は task にも習慣にも付けられる。time: 'HH:MM'、dur: 長さ（分） */
+  var DURS = [15, 30, 45, 60, 90, 120, 180];
+  function isHabit(t) { return !!(t && (t.repeat === 'daily' || t.repeat === 'weekly')); }
+  function sortDays(ds) { return (ds || []).slice().sort(function (a, b) { return ((a + 6) % 7) - ((b + 6) % 7); }); }   // 月はじまり
+  function onDay(h, iso) { return h.repeat === 'daily' || (h.days || []).indexOf(U.parse(iso).getDay()) >= 0; }
+  function habitDone(h, iso) { return !!(h.doneDates && h.doneDates[iso]); }
+  function repeatLabel(h) {
+    if (h.repeat === 'daily') return '毎日';
+    var ds = sortDays(h.days);
+    return ds.length === 7 ? '毎日' : '毎週 ' + ds.map(function (d) { return DOW[d]; }).join('・');
+  }
+  function toMin(hhmm) { var p = String(hhmm).split(':'); return (+p[0]) * 60 + (+p[1] || 0); }
+  function fromMin(m) { m = Math.max(0, Math.min(1440, m)); return U.pad(Math.floor(m / 60)) + ':' + U.pad(m % 60); }
+  function durOf(t) { return Number(t.dur) || 30; }
+  function timeLabel(t) { return t.time ? t.time + '〜' + fromMin(toMin(t.time) + durOf(t)) : ''; }
+  function durLabel(m) { return m < 60 ? m + '分' : (m % 60 ? Math.floor(m / 60) + '時間' + (m % 60) + '分' : (m / 60) + '時間'); }
+  function durOptions(cur) {
+    return DURS.map(function (m) { return '<option value="' + m + '"' + (m === cur ? ' selected' : '') + '>' + durLabel(m) + '</option>'; }).join('');
+  }
+  function daysPicker(id, cur) {
+    return '<div class="days" id="' + id + '">' + [1, 2, 3, 4, 5, 6, 0].map(function (d) {
+      return '<button type="button" data-day="' + d + '"' + ((cur || []).indexOf(d) >= 0 ? ' class="on"' : '') + '>' + DOW[d] + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /** 習慣のその日の済みを入れ替える（受け口には習慣の1行をまるごと送る） */
+  function toggleHabit(sp, id, iso) {
+    var h = Store.get(sp, 'task', id);
+    if (!h || !isHabit(h)) return;
+    var dd = h.doneDates || {};
+    if (dd[iso]) delete dd[iso]; else dd[iso] = Date.now();
+    var edge = U.iso(new Date(Date.now() - 120 * 86400000));
+    Object.keys(dd).forEach(function (k) { if (k < edge) delete dd[k]; });
+    h.doneDates = dd;
+    Store.put(sp, 'task', h);
+    renderAll();
+  }
+
   /** 期限の札。過ぎた・今日・明日を目立たせる */
   function dueBadge(due) {
     if (!due) return '';
@@ -68,8 +110,8 @@
   function looksSensitive(text) {
     return /[¥￥]\s*\d|\d[\d,，]*\s*(円|万円|万)|\d{6,}|\d{2,4}-\d{2,4}-\d{3,4}|@\w/.test(text);
   }
-  function confirmWork(text) {
-    if (space() !== 'work' || !looksSensitive(text)) return true;
+  function confirmWork(text, sp) {
+    if ((sp || space()) !== 'work' || !looksSensitive(text)) return true;
     return global.confirm('金額・番号・IDのような文字が入っています。\n会社のタスクには書かない決まりです。\n\nこのまま残しますか？');
   }
 
@@ -126,7 +168,7 @@
 
   /* ---------- 見出しの数 ---------- */
   function paintCounts() {
-    var open = Store.list(space(), 'task').filter(function (t) { return !t.done && !isDev(t); }).length;
+    var open = Store.list(space(), 'task').filter(function (t) { return !t.done && !isDev(t) && !isHabit(t); }).length;
     var memos = Store.list(space(), 'memo').length;
     document.getElementById('cntTask').textContent = open ? open : '';
     document.getElementById('cntMemo').textContent = memos ? memos : '';
@@ -181,6 +223,7 @@
     paintSync();
     paintCounts();
     if (view === 'task') renderTasks();
+    if (view === 'plan') renderPlan();
     if (view === 'memo') renderMemos();
     if (view === 'set') renderSettings();
   }
@@ -199,7 +242,8 @@
   }
 
   function taskRow(t) {
-    var sub = prioBadge(t) + dueBadge(t.due) + (t.note ? '<span class="hasnote">メモあり</span>' : '');
+    var sub = prioBadge(t) + dueBadge(t.due) + (t.time ? '<span class="due">' + timeLabel(t) + '</span>' : '')
+      + (t.note ? '<span class="hasnote">メモあり</span>' : '');
     return '<div class="trow' + (t.done ? ' done' : '') + '" data-id="' + U.esc(t.id) + '" data-prio="' + prioOf(t) + '">'
       + '<button type="button" class="ck" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
@@ -266,7 +310,41 @@
     + '<path d="M50 6 58 40 50 47 42 40Z"/><path d="M94 50 60 58 53 50 60 42Z"/>'
     + '<path d="M50 94 42 60 50 53 58 60Z"/><path d="M6 50 40 42 47 50 40 58Z"/></g></svg>';
 
-  function renderToday(open, dev) {
+  /* ---------- 習慣のまとまり（今日の分はチェックできる。今日お休みの分はたたむ） ---------- */
+  var showRest = false;
+
+  function habitRow(h, iso) {
+    var done = habitDone(h, iso);
+    var sub = '<span class="reptag">↻ ' + U.esc(repeatLabel(h)) + '</span>'
+      + (h.time ? '<span class="due">' + timeLabel(h) + '</span>' : '') + prioBadge(h);
+    return '<div class="trow habit' + (done ? ' done' : '') + '" data-id="' + U.esc(h.id) + '" data-prio="' + prioOf(h) + '">'
+      + '<button type="button" class="ck" data-act="htoggle" aria-label="' + (done ? '今日の済みを取り消す' : '今日は済み') + '">'
+      + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      + '</button>'
+      + '<button type="button" class="tbody" data-act="edit">'
+      + '<span class="ttl">' + U.esc(h.title) + '</span><span class="sub">' + sub + '</span>'
+      + '</button></div>';
+  }
+
+  function renderHabits(habits, iso) {
+    if (!habits.length) return '';
+    var byTime = function (a, b) {
+      return (a.time || '99') < (b.time || '99') ? -1 : (a.time || '99') > (b.time || '99') ? 1 : PRIO[prioOf(a)].rank - PRIO[prioOf(b)].rank;
+    };
+    var today = habits.filter(function (h) { return onDay(h, iso); }).sort(byTime);
+    var rest = habits.filter(function (h) { return !onDay(h, iso); }).sort(byTime);
+    var n = today.filter(function (h) { return habitDone(h, iso); }).length;
+    var h = '<div class="habithead">習慣<span>今日 ' + n + ' / ' + today.length + '</span></div>';
+    if (today.length) h += '<div class="card list">' + today.map(function (x) { return habitRow(x, iso); }).join('') + '</div>';
+    else h += '<div class="devnote">今日は習慣のお休みの日です</div>';
+    if (rest.length) {
+      h += '<button type="button" class="donehead" data-act="showrest">' + (showRest ? '▾' : '▸') + ' 今日はお休みの習慣 ' + rest.length + '件</button>';
+      if (showRest) h += '<div class="card list">' + rest.map(function (x) { return habitRow(x, iso); }).join('') + '</div>';
+    }
+    return h;
+  }
+
+  function renderToday(open, dev, habits) {
     var d = new Date(), today = U.today();
     var over = open.filter(function (t) { return t.due && t.due < today; }).length;
     var now = open.filter(function (t) { return t.due === today; }).length;
@@ -278,6 +356,11 @@
     if (now) f.push('<span class="fact now">今日まで <b>' + now + '</b></span>');
     if (high) f.push('<span class="fact high">重要度 高 <b>' + high + '</b></span>');
     if (wait) f.push('<span class="fact wait">返事待ち <b>' + wait + '</b></span>');
+    var th = (habits || []).filter(function (h) { return onDay(h, today); });
+    if (th.length) {
+      var hn = th.filter(function (h) { return habitDone(h, today); }).length;
+      f.push('<span class="fact' + (hn === th.length ? ' wait' : ' calm') + '">習慣 <b>' + hn + '/' + th.length + '</b></span>');
+    }
     document.getElementById('todayBand').innerHTML =
       '<div class="day"><b>' + d.getDate() + '</b><small>' + (d.getMonth() + 1) + '月・' + DOW[d.getDay()] + '</small></div>'
       + '<div class="facts">' + f.join('') + '</div>';
@@ -287,12 +370,15 @@
     var all = Store.list(space(), 'task');
     var dev = space() === 'work' ? all.filter(isDev) : [];
     all = all.filter(function (t) { return !isDev(t); });
+    var habits = all.filter(isHabit);
+    all = all.filter(function (t) { return !isHabit(t); });
     var open = all.filter(function (t) { return !t.done; }).sort(sortOpen);
     var done = all.filter(function (t) { return t.done; })
       .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
 
-    renderToday(open, dev);
-    var h = '';
+    renderToday(open, dev, habits);
+    var h = renderHabits(habits, U.today());
+    if (habits.length) h += '<div class="habithead">タスク<span>' + open.length + '件</span></div>';
     if (open.length) {
       h += '<div class="card list">' + open.map(taskRow).join('') + '</div>';
     } else {
@@ -314,6 +400,7 @@
 
   /* ---------- 足すときに決める重要度と期限 ---------- */
   var addPrio = 'mid', addDue = '';
+  var addTime = '', addDur = 30, addRepeat = '', addDaysSel = [], moreOpen = false;
 
   function quickDate(q) {
     if (q === '') return '';
@@ -331,23 +418,46 @@
       b.classList.toggle('on', on);
     });
     document.getElementById('addDue').value = addDue;
+    // 時刻・くり返し
+    document.getElementById('addMore').hidden = !moreOpen;
+    document.getElementById('addMoreBtn').textContent = (moreOpen ? '▾' : '▸') + ' 時刻・くり返し'
+      + (addTime || addRepeat ? '（' + [addTime, addRepeat === 'daily' ? '毎日' : addRepeat === 'weekly' ? '毎週' : ''].filter(Boolean).join('・') + '）' : '');
+    document.getElementById('addTime').value = addTime;
+    document.getElementById('addDur').innerHTML = durOptions(addDur);
+    document.getElementById('addDur').disabled = !addTime;
+    document.querySelectorAll('#addRepeat [data-rep]').forEach(function (b) { b.classList.toggle('on', b.dataset.rep === addRepeat); });
+    document.getElementById('addDaysRow').hidden = addRepeat !== 'weekly';
+    document.getElementById('addDays').outerHTML = daysPicker('addDays', addDaysSel);
+    // くり返すときは期限を使わない（毎日・毎週その日の分がある）
+    document.querySelector('#taskOpts .optrow:nth-child(2)').classList.toggle('off', !!addRepeat);
+    document.getElementById('addMoreHint').textContent = addRepeat
+      ? '習慣として足します。期限は使いません。済みは日ごとに付けます'
+      : (addTime && !addDue ? '期限が無いので、今日の予定として足します' : '');
   }
 
   function addTask(title) {
     title = title.trim();
     if (!title) return false;
     if (!confirmWork(title)) return false;
-    Store.put(space(), 'task', { title: title, due: addDue, prio: addPrio, note: '', done: false });
+    if (addRepeat === 'weekly' && !addDaysSel.length) { toast('曜日を選んでください'); return false; }
+    var rec = { title: title, due: addRepeat ? '' : addDue, prio: addPrio, note: '', done: false,
+                time: addTime, dur: addTime ? addDur : 0, repeat: addRepeat,
+                days: addRepeat === 'weekly' ? sortDays(addDaysSel) : [] };
+    if (rec.time && !rec.repeat && !rec.due) rec.due = U.today();     // 時刻だけ決めたら今日の予定
+    if (rec.repeat) rec.doneDates = {};
+    Store.put(space(), 'task', rec);
+    toast(rec.repeat ? '習慣を足しました（' + repeatLabel(rec) + '）' : 'タスクを足しました');
     addPrio = 'mid'; addDue = '';        // 足したら元に戻す
+    addTime = ''; addDur = 30; addRepeat = ''; addDaysSel = [];
     paintAddOpts();
     renderAll();
     return true;
   }
 
-  function toggleTask(id) {
-    var t = Store.get(space(), 'task', id);
-    if (!t || isDev(t)) return;           // 写しは済みにしない
-    var sp = space();
+  function toggleTask(id, spIn) {
+    var sp = spIn || space();
+    var t = Store.get(sp, 'task', id);
+    if (!t || isDev(t) || isHabit(t)) return;   // 写しは済みにしない。習慣は日ごと（toggleHabit）
     t.done = !t.done;
     t.doneAt = t.done ? Date.now() : 0;
     Store.put(sp, 'task', t);
@@ -363,17 +473,27 @@
     }
   }
 
-  function editTask(id) {
-    var sp = space();
+  function editTask(id, spIn) {
+    var sp = spIn || space();
     var t = Store.get(sp, 'task', id);
     if (!t) return;
     if (isDev(t)) { viewDev(id); return; } // 写しは直さない。見るだけ
+    var rep = isHabit(t) ? t.repeat : '';
     var quick = [['今日', 0], ['明日', 1], ['週末', weekendOffset()], ['1週間後', 7]];
     modal(
-      '<h2>' + U.esc(label(sp)) + 'のタスク</h2>'
+      '<h2>' + U.esc(label(sp)) + 'の' + (rep ? '習慣' : 'タスク') + '</h2>'
       + '<div class="f"><label for="e-title">やること</label><input type="text" id="e-title" value="' + U.esc(t.title) + '"></div>'
       + '<div class="f"><label>重要度</label>' + prioSeg('e-prio', prioOf(t)) + '</div>'
-      + '<div class="f"><label for="e-due">期限</label>'
+      + '<div class="f"><label>くり返し</label><div class="seg3 rep" id="e-rep">'
+      + [['', 'なし'], ['daily', '毎日'], ['weekly', '毎週']].map(function (r) {
+          return '<button type="button" data-rep="' + r[0] + '"' + (r[0] === rep ? ' class="on"' : '') + '>' + r[1] + '</button>';
+        }).join('') + '</div>'
+      + '<div class="edays"' + (rep === 'weekly' ? '' : ' hidden') + '>' + daysPicker('e-days', t.days || [new Date().getDay()]) + '</div></div>'
+      + '<div class="f"><label for="e-time">時刻と長さ</label><div class="f2">'
+      + '<input type="time" id="e-time" step="300" value="' + U.esc(t.time || '') + '">'
+      + '<select id="e-dur">' + durOptions(Number(t.dur) || 30) + '</select>'
+      + '<button type="button" class="mini" id="e-notime">なし</button></div></div>'
+      + '<div class="f edue"' + (rep ? ' hidden' : '') + '><label for="e-due">期限</label>'
       + '<div class="f2"><input type="date" id="e-due" value="' + U.esc(t.due || '') + '">'
       + '<button type="button" class="mini" data-due="">なし</button></div>'
       + '<div class="quick">' + quick.map(function (q) {
@@ -399,6 +519,18 @@
         m.querySelectorAll('[data-due]').forEach(function (b) {
           b.onclick = function () { due.value = b.dataset.due; };
         });
+        m.querySelectorAll('#e-rep [data-rep]').forEach(function (b) {
+          b.onclick = function () {
+            rep = b.dataset.rep;
+            m.querySelectorAll('#e-rep [data-rep]').forEach(function (x) { x.classList.toggle('on', x === b); });
+            m.querySelector('.edays').hidden = rep !== 'weekly';
+            m.querySelector('.edue').hidden = !!rep;
+          };
+        });
+        m.querySelectorAll('#e-days [data-day]').forEach(function (b) {
+          b.onclick = function () { b.classList.toggle('on'); };
+        });
+        m.querySelector('#e-notime').onclick = function () { m.querySelector('#e-time').value = ''; };
         m.querySelector('#e-cancel').onclick = closeModal;
         m.querySelector('#e-del').onclick = function () {
           Store.remove(sp, 'task', id);
@@ -415,8 +547,21 @@
           var title = m.querySelector('#e-title').value.trim();
           var note = m.querySelector('#e-note').value.trim();
           if (!title) { toast('やることが空です'); return; }
-          if (!confirmWork(title + '\n' + note)) return;
-          t.title = title; t.due = due.value || ''; t.note = note; t.prio = prio;
+          if (!confirmWork(title + '\n' + note, sp)) return;
+          var days = [];
+          m.querySelectorAll('#e-days [data-day].on').forEach(function (b) { days.push(+b.dataset.day); });
+          if (rep === 'weekly' && !days.length) { toast('曜日を選んでください'); return; }
+          var time = m.querySelector('#e-time').value || '';
+          t.title = title; t.note = note; t.prio = prio;
+          t.time = time; t.dur = time ? +m.querySelector('#e-dur').value : 0;
+          if (rep) {
+            if (!isHabit(t)) { t.doneDates = {}; t.done = false; t.doneAt = 0; }   // タスクから習慣へ
+            t.repeat = rep; t.days = rep === 'weekly' ? sortDays(days) : []; t.due = '';
+          } else {
+            if (isHabit(t)) { t.done = false; t.doneAt = 0; }                    // 習慣からタスクへ
+            t.repeat = ''; t.days = []; t.due = due.value || '';
+            if (t.time && !t.due) t.due = U.today();
+          }
           Store.put(sp, 'task', t);
           closeModal(); renderAll();
         };
@@ -428,6 +573,164 @@
   function weekendOffset() {
     var d = new Date().getDay();
     return d === 6 || d === 0 ? 0 : 6 - d;
+  }
+
+  /* ================= 予定（その日のタイムテーブル） =================
+     ★個人と会社をいっしょに並べる（その日の自分の予定は1つなので）。色で見分ける。中身は別々のまま
+     ・その日の期限のタスクと、その日にやる習慣を出す。時刻の無いものは上の「時間を決めていないもの」へ
+     ・空いている時間を押すと、その時刻でタスクを足せる（いま開いている側に足す）
+     ・部署の残りの写しは出さない（期限も時刻も無いため） */
+  var planDate = '';
+  var HOUR = 52;                                  // 1時間の高さ（px）
+
+  function planItems(iso) {
+    var out = [];
+    Store.SPACES.forEach(function (sp) {
+      Store.list(sp, 'task').forEach(function (t) {
+        if (isDev(t)) return;
+        if (isHabit(t)) { if (onDay(t, iso)) out.push({ sp: sp, t: t, habit: true, done: habitDone(t, iso) }); }
+        else if (t.due === iso) out.push({ sp: sp, t: t, habit: false, done: !!t.done });
+      });
+    });
+    return out;
+  }
+
+  /** 重なる予定を横に並べる（重なりの塊ごとに列の数をそろえる） */
+  function layout(items) {
+    items.sort(function (a, b) { return a.s - b.s || b.e - a.e; });
+    var cluster = [], colsEnd = [], clusterEnd = -1;
+    function close() {
+      var n = colsEnd.length;
+      cluster.forEach(function (x) { x.n = n; });
+      cluster = []; colsEnd = [];
+    }
+    items.forEach(function (x) {
+      if (x.s >= clusterEnd && cluster.length) close();
+      var c = 0;
+      while (c < colsEnd.length && colsEnd[c] > x.s) c++;
+      colsEnd[c] = x.e; x.col = c;
+      cluster.push(x);
+      clusterEnd = Math.max(clusterEnd, x.e);
+    });
+    if (cluster.length) close();
+    return items;
+  }
+
+  function planCheck(x) {
+    return '<button type="button" class="ck' + (x.done ? '' : '') + '" data-act="ptoggle" aria-label="' + (x.done ? '済みを取り消す' : '済みにする') + '">'
+      + '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      + '</button>';
+  }
+
+  function renderPlan() {
+    var iso = planDate || U.today();
+    var d = U.parse(iso), today = U.today();
+    var diff = U.daysFrom(iso);
+    document.getElementById('planDate').innerHTML = '<b>' + (d.getMonth() + 1) + '月' + d.getDate() + '日</b>（' + DOW[d.getDay()] + '）'
+      + (diff === 0 ? '<span class="rel now">今日</span>' : diff === 1 ? '<span class="rel">明日</span>' : diff === -1 ? '<span class="rel">昨日</span>' : '');
+    document.getElementById('planToday').hidden = iso === today;
+
+    var all = planItems(iso);
+    var loose = all.filter(function (x) { return !x.t.time; });
+    var timed = all.filter(function (x) { return x.t.time; }).map(function (x) {
+      x.s = toMin(x.t.time); x.e = Math.min(1440, x.s + durOf(x.t)); return x;
+    });
+    layout(timed);
+
+    var h = '';
+    // 数の帯
+    var doneN = all.filter(function (x) { return x.done; }).length;
+    h += '<div class="plansum">' + (all.length
+      ? '<span class="fact calm">予定 <b>' + all.length + '</b></span><span class="fact' + (doneN === all.length ? ' wait' : ' calm') + '">済み <b>' + doneN + '</b></span>'
+        + '<span class="legend"><i class="lg personal"></i>個人<i class="lg work"></i>会社<i class="lg habit"></i>習慣</span>'
+      : '<span class="fact calm">この日の予定はありません</span>') + '</div>';
+
+    // 時間を決めていないもの
+    if (loose.length) {
+      loose.sort(function (a, b) { return (a.done - b.done) || (PRIO[prioOf(a.t)].rank - PRIO[prioOf(b.t)].rank); });
+      h += '<div class="habithead">時間を決めていないもの<span>' + loose.length + '件</span></div><div class="card list">'
+        + loose.map(function (x) {
+            return '<div class="trow pl ' + x.sp + (x.habit ? ' habit' : '') + (x.done ? ' done' : '') + '" data-id="' + U.esc(x.t.id) + '" data-sp="' + x.sp + '" data-prio="' + prioOf(x.t) + '">'
+              + planCheck(x).replace('class="ck"', 'class="ck"')
+              + '<button type="button" class="tbody" data-act="pedit"><span class="ttl">' + U.esc(x.t.title) + '</span>'
+              + '<span class="sub"><span class="sptag ' + x.sp + '">' + label(x.sp) + '</span>'
+              + (x.habit ? '<span class="reptag">↻ ' + U.esc(repeatLabel(x.t)) + '</span>' : '') + prioBadge(x.t) + '</span></button></div>';
+          }).join('') + '</div>';
+    }
+
+    // タイムテーブル
+    var startH = 7, endH = 22;
+    timed.forEach(function (x) { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.ceil(x.e / 60)); });
+    if (iso === today) {
+      var nowM = new Date().getHours() * 60 + new Date().getMinutes();
+      startH = Math.min(startH, Math.floor(nowM / 60)); endH = Math.max(endH, Math.ceil((nowM + 1) / 60));
+    }
+    endH = Math.min(24, endH);
+    var px = function (m) { return (m - startH * 60) * HOUR / 60; };
+    h += '<div class="tt" style="height:' + ((endH - startH) * HOUR + 1) + 'px">';
+    for (var hr = startH; hr < endH; hr++) {
+      h += '<button type="button" class="slot" data-act="slot" data-h="' + hr + '" style="top:' + px(hr * 60) + 'px;height:' + HOUR + 'px" aria-label="' + hr + '時に足す">'
+        + '<span class="hl">' + hr + ':00</span></button>';
+    }
+    timed.forEach(function (x) {
+      var top = px(x.s), height = Math.max(24, px(x.e) - top - 2);
+      var w = 100 / x.n;
+      h += '<div class="ev ' + x.sp + (x.habit ? ' habit' : '') + (x.done ? ' done' : '') + (height < 40 ? ' short' : '') + '" data-id="' + U.esc(x.t.id) + '" data-sp="' + x.sp + '" data-prio="' + prioOf(x.t) + '"'
+        + ' style="top:' + top + 'px;height:' + height + 'px;left:calc(46px + (100% - 52px) * ' + (x.col * w / 100) + ');width:calc((100% - 52px) * ' + (w / 100) + ' - 3px)">'
+        + planCheck(x)
+        + '<button type="button" class="evbody" data-act="pedit">'
+        + '<span class="evt">' + U.esc(x.t.title) + '</span>'
+        + '<span class="evs">' + timeLabel(x.t) + (x.habit ? ' ・↻' : '') + '</span>'
+        + '</button></div>';
+    });
+    if (iso === today) {
+      var nm = new Date().getHours() * 60 + new Date().getMinutes();
+      h += '<div class="nowline" style="top:' + px(nm) + 'px"><span>' + fromMin(nm) + '</span></div>';
+    }
+    h += '</div>';
+    h += '<div class="devnote plannote">空いている時間を押すと、その時刻で「' + U.esc(label()) + '」のタスクを足せます。</div>';
+    document.getElementById('planBody').innerHTML = h;
+
+    // 今日を開いたら、いまの時刻が見えるところまで送る（初めの1回だけ）
+    if (iso === today && !renderPlan.scrolled) {
+      renderPlan.scrolled = true;
+      var line = document.querySelector('#planBody .nowline');
+      if (line) global.scrollTo(0, Math.max(0, line.getBoundingClientRect().top + global.scrollY - 260));
+    }
+  }
+
+  /** 空いている時間を押したとき：その時刻でタスクを足す（いま開いている側へ） */
+  function addAtSlot(hr) {
+    var iso = planDate || U.today(), sp = space();
+    modal('<h2>' + (U.parse(iso).getMonth() + 1) + '/' + U.parse(iso).getDate() + ' の予定を足す（' + U.esc(label(sp)) + '）</h2>'
+      + '<div class="f"><label for="s-title">やること</label><input type="text" id="s-title" enterkeyhint="done"></div>'
+      + '<div class="f"><label for="s-time">時刻と長さ</label><div class="f2">'
+      + '<input type="time" id="s-time" step="300" value="' + U.pad(hr) + ':00"><select id="s-dur">' + durOptions(60) + '</select></div></div>'
+      + '<div class="f"><label>重要度</label>' + prioSeg('s-prio', 'mid') + '</div>'
+      + (sp === 'work' ? '<div class="hint">会社のタスクには、金額・氏名・IDを書かない</div>' : '')
+      + '<div class="acts"><button type="button" id="s-cancel">やめる</button><button type="button" class="go" id="s-ok">足す</button></div>',
+      function (m) {
+        var prio = 'mid';
+        m.querySelectorAll('#s-prio [data-prio]').forEach(function (b) {
+          b.onclick = function () {
+            prio = b.dataset.prio;
+            m.querySelectorAll('#s-prio [data-prio]').forEach(function (x) { x.classList.toggle('on', x === b); });
+          };
+        });
+        m.querySelector('#s-cancel').onclick = closeModal;
+        var ok = function () {
+          var title = m.querySelector('#s-title').value.trim();
+          if (!title) { toast('やることを書いてください'); return; }
+          if (!confirmWork(title, sp)) return;
+          var time = m.querySelector('#s-time').value || (U.pad(hr) + ':00');
+          Store.put(sp, 'task', { title: title, prio: prio, due: iso, time: time, dur: +m.querySelector('#s-dur').value || 60,
+                                  note: '', done: false, repeat: '', days: [] });
+          closeModal(); renderAll(); toast('予定を足しました');
+        };
+        m.querySelector('#s-ok').onclick = ok;
+        m.querySelector('#s-title').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } });
+        setTimeout(function () { m.querySelector('#s-title').focus(); }, 50);
+      });
   }
 
   /* ================= メモ ================= */
@@ -696,6 +999,47 @@
     document.getElementById('addDue').addEventListener('change', function (e) {
       addDue = e.target.value || ''; paintAddOpts();
     });
+    document.getElementById('addMoreBtn').onclick = function () { moreOpen = !moreOpen; paintAddOpts(); };
+    document.getElementById('addTime').addEventListener('change', function (e) { addTime = e.target.value || ''; paintAddOpts(); });
+    document.getElementById('addDur').addEventListener('change', function (e) { addDur = +e.target.value || 30; });
+    document.getElementById('addRepeat').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-rep]');
+      if (!b) return;
+      addRepeat = b.dataset.rep;
+      if (addRepeat === 'weekly' && !addDaysSel.length) addDaysSel = [new Date().getDay()];
+      paintAddOpts();
+    });
+    document.getElementById('addDaysRow').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-day]');
+      if (!b) return;
+      var d = +b.dataset.day, i = addDaysSel.indexOf(d);
+      if (i >= 0) addDaysSel.splice(i, 1); else addDaysSel.push(d);
+      paintAddOpts();
+    });
+    document.getElementById('planPrev').onclick = function () {
+      var d = U.parse(planDate || U.today()); d.setDate(d.getDate() - 1); planDate = U.iso(d); renderPlan();
+    };
+    document.getElementById('planNext').onclick = function () {
+      var d = U.parse(planDate || U.today()); d.setDate(d.getDate() + 1); planDate = U.iso(d); renderPlan();
+    };
+    document.getElementById('planToday').onclick = function () { planDate = ''; renderPlan.scrolled = false; renderPlan(); };
+    document.getElementById('planBody').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act]');
+      if (!b) return;
+      if (b.dataset.act === 'slot') { addAtSlot(+b.dataset.h); return; }
+      var row = b.closest('[data-id]');
+      if (!row) return;
+      var sp = row.dataset.sp, id = row.dataset.id, t = Store.get(sp, 'task', id);
+      if (!t) return;
+      if (b.dataset.act === 'pedit') { editTask(id, sp); return; }
+      if (b.dataset.act === 'ptoggle') {
+        if (isHabit(t)) toggleHabit(sp, id, planDate || U.today());
+        else toggleTask(id, sp);
+      }
+    });
+    // 予定を開いている間は、いまの時刻の線を1分ごとに動かす
+    setInterval(function () { if (view === 'plan' && modalWrap.hidden) renderPlan(); }, 60000);
+    paintAddOpts();
     var taskInput = document.getElementById('taskInput');
     document.getElementById('taskForm').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -706,9 +1050,20 @@
       if (!b) return;
       if (b.dataset.act === 'showdone') { showDone = !showDone; renderTasks(); return; }
       if (b.dataset.act === 'showdev') { showDev = !showDev; renderTasks(); return; }
+      if (b.dataset.act === 'showrest') { showRest = !showRest; renderTasks(); return; }
       var row = b.closest('.trow');
       if (!row) return;
       if (b.dataset.act === 'view') { viewDev(row.dataset.id); return; }
+      if (b.dataset.act === 'htoggle') {
+        var hb = Store.get(space(), 'task', row.dataset.id);
+        if (hb && !habitDone(hb, U.today()) && !b.classList.contains('pop')) {
+          b.classList.add('pop');
+          setTimeout(function () { toggleHabit(space(), row.dataset.id, U.today()); }, 380);
+        } else if (!b.classList.contains('pop')) {
+          toggleHabit(space(), row.dataset.id, U.today());
+        }
+        return;
+      }
       if (b.dataset.act === 'toggle') {
         // 済みにするときだけ、金の丸と光を見せてから入れ替える（戻すときはすぐ）
         var cur = Store.get(space(), 'task', row.dataset.id);
