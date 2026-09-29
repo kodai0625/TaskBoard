@@ -1,9 +1,11 @@
 /* Task Board 見た目（Pair Board の形を借りています）
-   ★個人と会社で見出しの色を変えます。いまどちらに書いているかを、一目で分かるように */
+   ★個人と会社で見出しの色を変えます。いまどちらに書いているかを、一目で分かるように
+   ★色はホーム画面のアイコン（濃い紫・アイボリー・金）にそろえています（2026-09-29） */
 :root{
-  --paper:#f7f4ee; --card:#ffffff; --ink:#25313c; --dim:#71797f;
-  --line:#e2dccf; --head:#2c3e50; --head2:#3d566e;
-  --accent:#3f6f8f; --danger:#b7524a; --ok:#4e8c5a; --warn:#c68a2e;
+  --paper:#f5f1e8; --card:#fffdf9; --ink:#2a2530; --dim:#766f7c;
+  --line:#e4ddd0; --head:#2a2433; --head2:#40354f;
+  --accent:#6b5a8f; --danger:#b7524a; --ok:#4e8c5a; --warn:#c68a2e;
+  --gold:#bf9a5a; --gold2:#d8b77b; --gold-soft:rgba(216,183,123,.18);
   --shadow:0 1px 2px rgba(0,0,0,.06),0 6px 18px rgba(0,0,0,.05);
   --on:#ffffff;
   --r:12px;
@@ -13,18 +15,20 @@ body[data-space="work"]{ --head:#4a3527; --head2:#6b4c36; --accent:#a8652f; }
 /* 暗い画面。見る側が選んだときも、決めていないときも同じ色になるように2つ書きます */
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --paper:#161a1e; --card:#1e242a; --ink:#e6e3dc; --dim:#9aa3aa;
-    --line:#2f373f; --head:#101519; --head2:#1b242c;
-    --accent:#7fb0cf; --danger:#e0877e; --ok:#86c092; --warn:#e0b060;
+    --paper:#16141b; --card:#201d27; --ink:#ebe6de; --dim:#a39cab;
+    --line:#332e3b; --head:#15121b; --head2:#262031;
+    --accent:#b3a4d6; --danger:#e0877e; --ok:#86c092; --warn:#e0b060;
+    --gold:#d8b77b; --gold2:#e8cc98; --gold-soft:rgba(216,183,123,.14);
     --on:#111619;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
   }
   :root:not([data-theme="light"]) body[data-space="work"]{ --head:#20160f; --head2:#3a2a1e; --accent:#e0a36a; }
 }
 :root[data-theme="dark"]{
-  --paper:#161a1e; --card:#1e242a; --ink:#e6e3dc; --dim:#9aa3aa;
-  --line:#2f373f; --head:#101519; --head2:#1b242c;
-  --accent:#7fb0cf; --danger:#e0877e; --ok:#86c092; --warn:#e0b060;
+  --paper:#16141b; --card:#201d27; --ink:#ebe6de; --dim:#a39cab;
+  --line:#332e3b; --head:#15121b; --head2:#262031;
+  --accent:#b3a4d6; --danger:#e0877e; --ok:#86c092; --warn:#e0b060;
+  --gold:#d8b77b; --gold2:#e8cc98; --gold-soft:rgba(216,183,123,.14);
   --on:#111619;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
 }
@@ -243,3 +247,84 @@ main{max-width:640px; margin:0 auto}
   box-shadow:0 4px 16px rgba(0,0,0,.3); white-space:nowrap;
 }
 .toast .undo{border:0; background:none; color:#f2b33d; font-weight:700; padding:0 0 0 10px; font-size:13px}
+
+
+/* ================================================================
+   装飾（2026-09-29 ko-dai さん「少しつまらない」から）
+   アイコンの4方向の光・金のチェックを、画面のあちこちに少しずつ置く。
+   ★飾りは読むのを邪魔しない強さにとどめる（見出しの模様は 7% の濃さ）
+   ================================================================ */
+
+/* 見出し：うっすら4方向の光と、右上の金のにじみ */
+.head{
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='%23F1EDE4' fill-opacity='.07'%3E%3Cpath d='M50 4 58 40 50 48 42 40Z'/%3E%3Cpath d='M96 50 60 58 52 50 60 42Z'/%3E%3Cpath d='M50 96 42 60 50 52 58 60Z'/%3E%3Cpath d='M4 50 40 42 48 50 40 58Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat right -34px top -30px / 170px 170px,
+    radial-gradient(circle at 88% 0%, rgba(216,183,123,.22), transparent 55%),
+    linear-gradient(180deg,var(--head),var(--head2));
+}
+.brand span{font-family:"Hiragino Mincho ProN","Yu Mincho",YuMincho,Georgia,serif; font-weight:600; letter-spacing:.07em; font-size:17px}
+.logo{border-radius:6px; box-shadow:0 0 0 1px rgba(216,183,123,.35)}
+.tab.on{border-bottom-color:var(--gold2)}
+.gear.on{background:var(--gold2); color:#2a2433}
+.sp.on{box-shadow:0 1px 3px rgba(0,0,0,.25), inset 0 0 0 1px rgba(191,154,90,.55)}
+
+/* 今日の帯 */
+.today{
+  display:flex; align-items:center; gap:12px; margin:0 0 10px; padding:10px 14px;
+  border-radius:var(--r); border:1px solid var(--line); box-shadow:var(--shadow);
+  background:linear-gradient(120deg,var(--card) 55%,var(--gold-soft));
+  position:relative; overflow:hidden;
+}
+.today::after{
+  content:"✦"; position:absolute; right:10px; top:-6px; font-size:46px; line-height:1;
+  color:var(--gold); opacity:.16; pointer-events:none;
+}
+.today .day{display:flex; flex-direction:column; align-items:center; min-width:46px; line-height:1.1}
+.today .day b{font-family:"Hiragino Mincho ProN","Yu Mincho",YuMincho,Georgia,serif; font-size:28px; font-weight:600; color:var(--accent)}
+.today .day small{font-size:11px; color:var(--dim); letter-spacing:.05em}
+.today .facts{display:flex; flex-wrap:wrap; gap:5px; min-width:0}
+.fact{font-size:11.5px; padding:1px 9px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--ink); white-space:nowrap}
+.fact b{font-weight:700}
+.fact.over{border-color:var(--danger); color:var(--danger)}
+.fact.now{border-color:var(--warn); color:var(--warn)}
+.fact.high{background:var(--danger); border-color:var(--danger); color:#fff}
+.fact.wait{background:var(--gold-soft); border-color:var(--gold); color:var(--ink)}
+.fact.calm{color:var(--dim)}
+
+/* タスクの行：左に重要度の色の線 */
+.trow{position:relative}
+.trow::before{content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:transparent}
+.trow[data-prio="high"]::before{background:var(--danger)}
+.trow[data-prio="mid"]::before{background:var(--accent); opacity:.55}
+.trow[data-prio="low"]::before{background:var(--line)}
+.trow.done::before{background:transparent}
+
+/* 済み：金の丸と、はじける光 */
+.trow.done .ck::before{background:var(--gold); border-color:var(--gold)}
+.trow.done .ck{color:#2a2433}
+.ck{position:relative}
+.ck.pop::before{animation:ckfill .32s ease-out forwards}
+.ck.pop{color:#2a2433}
+.ck.pop::after{
+  content:"✦"; position:absolute; left:50%; top:50%; font-size:30px; line-height:1; color:var(--gold2);
+  transform:translate(-50%,-50%) scale(.2); opacity:0; animation:spark .45s ease-out forwards; pointer-events:none;
+}
+@keyframes ckfill{0%{transform:scale(1)} 45%{transform:scale(1.28); background:var(--gold); border-color:var(--gold); opacity:1} 100%{transform:scale(1); background:var(--gold); border-color:var(--gold); opacity:1}}
+@keyframes spark{0%{opacity:0; transform:translate(-50%,-50%) scale(.2) rotate(0)} 40%{opacity:.95} 100%{opacity:0; transform:translate(-50%,-50%) scale(1.7) rotate(45deg)}}
+@media (prefers-reduced-motion: reduce){ .ck.pop::before,.ck.pop::after{animation:none} }
+
+/* 空のとき：光の絵 */
+.empty.art{padding:30px 8px 26px}
+.empty.art .star{display:block; margin:0 auto 10px; width:54px; height:54px; opacity:.9}
+.empty.art b{display:block; color:var(--ink); font-size:14px; margin-bottom:2px}
+
+/* メモ：上に金の線と、うっすら引用の印 */
+.memo{position:relative; border-top:3px solid var(--gold2); overflow:hidden}
+.memo::after{content:"\201C"; position:absolute; right:10px; top:-10px; font-family:Georgia,serif; font-size:64px; line-height:1; color:var(--gold); opacity:.14; pointer-events:none}
+
+/* 見出しの印 */
+.secttl::before,.devhead::before{content:"✦ "; color:var(--gold)}
+.donehead{color:var(--dim)}
+
+/* 足すボタンに金のふち */
+.addgo{box-shadow:inset 0 0 0 1.5px rgba(216,183,123,.55), var(--shadow)}

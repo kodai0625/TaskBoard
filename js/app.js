@@ -142,7 +142,7 @@
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', sp === 'work' ? '#4a3527' : '#2c3e50');
+    if (meta) meta.setAttribute('content', sp === 'work' ? '#4a3527' : '#2a2433');
     document.getElementById('taskInput').placeholder = label() + 'のタスクを足す';
     document.getElementById('memoInput').placeholder = label() + 'のメモを書く';
     var rule = sp === 'work'
@@ -200,7 +200,7 @@
 
   function taskRow(t) {
     var sub = prioBadge(t) + dueBadge(t.due) + (t.note ? '<span class="hasnote">メモあり</span>' : '');
-    return '<div class="trow' + (t.done ? ' done' : '') + '" data-id="' + U.esc(t.id) + '">'
+    return '<div class="trow' + (t.done ? ' done' : '') + '" data-id="' + U.esc(t.id) + '" data-prio="' + prioOf(t) + '">'
       + '<button type="button" class="ck" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       + '</button>'
@@ -261,6 +261,28 @@
       function (m) { m.querySelector('#v-close').onclick = closeModal; });
   }
 
+  /* ---------- 今日の帯（日付と、残り・期限切れ・今日まで・重要度 高・返事待ちの数） ---------- */
+  var STAR = '<svg class="star" viewBox="0 0 100 100" aria-hidden="true"><g fill="var(--gold2)">'
+    + '<path d="M50 6 58 40 50 47 42 40Z"/><path d="M94 50 60 58 53 50 60 42Z"/>'
+    + '<path d="M50 94 42 60 50 53 58 60Z"/><path d="M6 50 40 42 47 50 40 58Z"/></g></svg>';
+
+  function renderToday(open, dev) {
+    var d = new Date(), today = U.today();
+    var over = open.filter(function (t) { return t.due && t.due < today; }).length;
+    var now = open.filter(function (t) { return t.due === today; }).length;
+    var high = open.filter(function (t) { return prioOf(t) === 'high'; }).length;
+    var wait = dev.filter(function (t) { return t.section === 'ko-dai'; }).length;
+    var f = [];
+    f.push('<span class="fact calm">' + (open.length ? '残り <b>' + open.length + '</b>' : 'やることはありません') + '</span>');
+    if (over) f.push('<span class="fact over">期限切れ <b>' + over + '</b></span>');
+    if (now) f.push('<span class="fact now">今日まで <b>' + now + '</b></span>');
+    if (high) f.push('<span class="fact high">重要度 高 <b>' + high + '</b></span>');
+    if (wait) f.push('<span class="fact wait">返事待ち <b>' + wait + '</b></span>');
+    document.getElementById('todayBand').innerHTML =
+      '<div class="day"><b>' + d.getDate() + '</b><small>' + (d.getMonth() + 1) + '月・' + DOW[d.getDay()] + '</small></div>'
+      + '<div class="facts">' + f.join('') + '</div>';
+  }
+
   function renderTasks() {
     var all = Store.list(space(), 'task');
     var dev = space() === 'work' ? all.filter(isDev) : [];
@@ -269,11 +291,13 @@
     var done = all.filter(function (t) { return t.done; })
       .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
 
+    renderToday(open, dev);
     var h = '';
     if (open.length) {
       h += '<div class="card list">' + open.map(taskRow).join('') + '</div>';
     } else {
-      h += '<div class="empty">' + (done.length ? '全部済みました' : 'まだ何もありません。上に書いて足してください') + '</div>';
+      h += '<div class="empty art">' + STAR
+        + (done.length ? '<b>全部済みました</b>おつかれさまでした' : '<b>まだ何もありません</b>上に書いて足してください') + '</div>';
     }
     h += renderDev(dev);
     if (done.length) {
@@ -685,7 +709,16 @@
       var row = b.closest('.trow');
       if (!row) return;
       if (b.dataset.act === 'view') { viewDev(row.dataset.id); return; }
-      if (b.dataset.act === 'toggle') toggleTask(row.dataset.id);
+      if (b.dataset.act === 'toggle') {
+        // 済みにするときだけ、金の丸と光を見せてから入れ替える（戻すときはすぐ）
+        var cur = Store.get(space(), 'task', row.dataset.id);
+        if (cur && !cur.done && !isDev(cur) && !b.classList.contains('pop')) {
+          b.classList.add('pop');
+          setTimeout(function () { toggleTask(row.dataset.id); }, 380);
+        } else if (!b.classList.contains('pop')) {
+          toggleTask(row.dataset.id);
+        }
+      }
       if (b.dataset.act === 'edit') editTask(row.dataset.id);
     });
 
