@@ -166,6 +166,16 @@ main{max-width:640px; margin:0 auto}
   border:0; background:none; color:var(--dim); font-size:13px; font-weight:600;
   padding:12px 4px 6px; letter-spacing:.03em;
 }
+.devhead{display:flex; align-items:baseline; gap:8px; margin:18px 4px 2px; font-size:14px; font-weight:700}
+.devhead span,.devgrp span{font-size:12px; font-weight:400; color:var(--dim)}
+.devnote{font-size:11.5px; color:var(--dim); margin:0 4px 8px}
+.devsub{font-size:12.5px; font-weight:600; color:var(--danger); margin:6px 4px 4px}
+.devgrp{display:flex; align-items:baseline; gap:6px; margin:10px 4px 4px; font-size:12.5px; font-weight:600}
+.ck.ro{display:grid; place-items:center; width:40px; height:44px}
+.ck.ro::before{border-style:dotted; opacity:.45}
+.busho{font-size:11px; padding:0 7px; border-radius:999px; line-height:1.7; background:var(--line); color:var(--ink)}
+.devbody{white-space:pre-wrap; word-break:break-word; font-size:14px; line-height:1.7; background:var(--card);
+  border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:6px 0 4px}
 .empty{color:var(--dim); font-size:13px; text-align:center; padding:22px 8px}
 
 /* メモ */

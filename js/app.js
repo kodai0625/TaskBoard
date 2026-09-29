@@ -44,6 +44,11 @@
     }).join('') + '</div>';
   }
 
+  /* ---------- 部署の残りの写し（Mac の 部署の残りを写す.py が入れる。会社の側だけ） ----------
+     正本は会社の保管庫の部署のノート。ここは写しなので、済み・直す・消すはできない
+     （やっても次の回に元に戻るため）。押すと全文を見るだけ */
+  function isDev(t) { return t && (t.src === 'dev' || String(t.id || '').indexOf('dev-') === 0); }
+
   /** 期限の札。過ぎた・今日・明日を目立たせる */
   function dueBadge(due) {
     if (!due) return '';
@@ -121,7 +126,7 @@
 
   /* ---------- 見出しの数 ---------- */
   function paintCounts() {
-    var open = Store.list(space(), 'task').filter(function (t) { return !t.done; }).length;
+    var open = Store.list(space(), 'task').filter(function (t) { return !t.done && !isDev(t); }).length;
     var memos = Store.list(space(), 'memo').length;
     document.getElementById('cntTask').textContent = open ? open : '';
     document.getElementById('cntMemo').textContent = memos ? memos : '';
@@ -206,8 +211,60 @@
       + '</div>';
   }
 
+  var showDev = false;
+
+  function devRow(t) {
+    return '<div class="trow dev" data-id="' + U.esc(t.id) + '">'
+      + '<span class="ck ro" aria-hidden="true"></span>'
+      + '<button type="button" class="tbody" data-act="view">'
+      + '<span class="ttl">' + U.esc(t.title) + '</span>'
+      + '<span class="sub"><span class="busho">' + U.esc(t.busho || '') + '</span>' + prioBadge(t) + '</span>'
+      + '</button></div>';
+  }
+
+  function renderDev(dev) {
+    if (!dev.length) return '';
+    var byOrder = function (a, b) { return (a.order || 0) - (b.order || 0); };
+    var wait = dev.filter(function (t) { return t.section === 'ko-dai'; }).sort(byOrder);
+    var rest = dev.filter(function (t) { return t.section !== 'ko-dai'; }).sort(byOrder);
+    var h = '<div class="devhead">アプリ制作（部署の残り）<span>' + dev.length + '件</span></div>'
+      + '<div class="devnote">会社の保管庫の部署のノートの写しです。ここでは済みにも直すこともできません（直すのは部署のノート）。</div>';
+    if (wait.length) {
+      h += '<div class="devsub">★ko-dai さんの返事待ち ' + wait.length + '件</div>'
+        + '<div class="card list">' + wait.map(devRow).join('') + '</div>';
+    }
+    if (rest.length) {
+      h += '<button type="button" class="donehead" data-act="showdev">' + (showDev ? '▾' : '▸') + ' 残っていること ' + rest.length + '件</button>';
+      if (showDev) {
+        var groups = [], at = {};
+        rest.forEach(function (t) {
+          var b = t.busho || '（部署なし）';
+          if (!(b in at)) { at[b] = groups.length; groups.push({ name: b, items: [] }); }
+          groups[at[b]].items.push(t);
+        });
+        groups.forEach(function (g) {
+          h += '<div class="devgrp">' + U.esc(g.name) + '<span>' + g.items.length + '件</span></div>'
+            + '<div class="card list">' + g.items.map(devRow).join('') + '</div>';
+        });
+      }
+    }
+    return h;
+  }
+
+  function viewDev(id) {
+    var t = Store.get(space(), 'task', id);
+    if (!t) return;
+    modal('<h2>' + U.esc(t.title) + '</h2>'
+      + '<div class="hint"><span class="busho">' + U.esc(t.busho || '') + '</span> ' + prioBadge(t) + '</div>'
+      + '<div class="devbody">' + U.esc(t.note || '') + '</div>'
+      + '<div class="acts"><button type="button" class="go" id="v-close">閉じる</button></div>',
+      function (m) { m.querySelector('#v-close').onclick = closeModal; });
+  }
+
   function renderTasks() {
     var all = Store.list(space(), 'task');
+    var dev = space() === 'work' ? all.filter(isDev) : [];
+    all = all.filter(function (t) { return !isDev(t); });
     var open = all.filter(function (t) { return !t.done; }).sort(sortOpen);
     var done = all.filter(function (t) { return t.done; })
       .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
@@ -218,6 +275,7 @@
     } else {
       h += '<div class="empty">' + (done.length ? '全部済みました' : 'まだ何もありません。上に書いて足してください') + '</div>';
     }
+    h += renderDev(dev);
     if (done.length) {
       h += '<button type="button" class="donehead" data-act="showdone">'
         + (showDone ? '▾' : '▸') + ' 済み ' + done.length + '件</button>';
@@ -264,7 +322,7 @@
 
   function toggleTask(id) {
     var t = Store.get(space(), 'task', id);
-    if (!t) return;
+    if (!t || isDev(t)) return;           // 写しは済みにしない
     var sp = space();
     t.done = !t.done;
     t.doneAt = t.done ? Date.now() : 0;
@@ -285,6 +343,7 @@
     var sp = space();
     var t = Store.get(sp, 'task', id);
     if (!t) return;
+    if (isDev(t)) { viewDev(id); return; } // 写しは直さない。見るだけ
     var quick = [['今日', 0], ['明日', 1], ['週末', weekendOffset()], ['1週間後', 7]];
     modal(
       '<h2>' + U.esc(label(sp)) + 'のタスク</h2>'
@@ -443,11 +502,14 @@
 
     h += '<div class="secttl">いまの数</div><div class="card">';
     Store.SPACES.forEach(function (sp) {
-      var tasks = Store.list(sp, 'task');
+      var all = Store.list(sp, 'task');
+      var devN = all.filter(isDev).length;
+      var tasks = all.filter(function (t) { return !isDev(t); });
       var open = tasks.filter(function (t) { return !t.done; }).length;
       var ss = Sync.of[sp].state();
       h += '<div class="setrow"><div><div class="k">' + U.esc(label(sp)) + '</div>'
         + '<div class="d">タスク ' + open + '件（済み ' + (tasks.length - open) + '件）・メモ ' + Store.list(sp, 'memo').length + '件'
+        + (devN ? '・部署の残りの写し ' + devN + '件' : '')
         + '・' + (ss.kind === 'off' ? '端末の中だけ' : ss.kind === 'error' ? '送れていません' : ss.pending ? '未送信 ' + ss.pending + '件' : '同期ずみ')
         + '</div></div></div>';
     });
@@ -619,8 +681,10 @@
       var b = e.target.closest('[data-act]');
       if (!b) return;
       if (b.dataset.act === 'showdone') { showDone = !showDone; renderTasks(); return; }
+      if (b.dataset.act === 'showdev') { showDev = !showDev; renderTasks(); return; }
       var row = b.closest('.trow');
       if (!row) return;
+      if (b.dataset.act === 'view') { viewDev(row.dataset.id); return; }
       if (b.dataset.act === 'toggle') toggleTask(row.dataset.id);
       if (b.dataset.act === 'edit') editTask(row.dataset.id);
     });
