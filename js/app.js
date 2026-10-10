@@ -1620,6 +1620,40 @@
       });
   }
 
+  /* ================= 新しい版の見張り（2026-10-11） =================
+     ホーム画面に置いたアプリは、閉じないかぎり何日でも古い版のまま動き続ける。
+     公開し直したのに古い画面に新しい書き方を貼って、「読めない行が4行」と出た（2026-10-11 ko-dai さんの iPhone）。
+     表に戻ってきたとき・開いたときに index.html の版の印を見て、違っていたら入れ替える。
+       ・打ちかけの文字・開いた別窓・開いている自作アプリがあるときは、勝手に入れ替えない（下に知らせを出す）
+       ・同じ版への入れ替えは1回だけ試す（うまく入れ替わらなくても、くり返さない） */
+  var loadedVer = (function () {
+    var el = document.querySelector('script[src*="js/app.js"]');
+    var m = el && String(el.getAttribute('src')).match(/[?&]v=([0-9a-zA-Z]+)/);
+    return m ? m[1] : '';
+  })();
+  var newVer = '', verCheckedAt = 0;
+
+  function midWork() {
+    if (!modalWrap.hidden || vault) return true;
+    return [].some.call(document.querySelectorAll('input[type=text],input[type=password],textarea'),
+      function (el) { return el.value.trim() !== ''; });
+  }
+  function applyUpdate() { location.replace(location.pathname + '?v=' + newVer); }
+
+  /** auto が true なら、手を止めているときに限って、聞かずに入れ替える */
+  function checkVersion(auto) {
+    if (!loadedVer || location.protocol.indexOf('http') !== 0 || Date.now() - verCheckedAt < 60000) return;
+    verCheckedAt = Date.now();
+    fetch('index.html', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
+      var m = t.match(/js\/app\.js\?v=([0-9a-zA-Z]+)/);
+      if (!m || m[1] === loadedVer) return;
+      newVer = m[1];
+      var tried = location.search.indexOf('v=' + newVer) >= 0;
+      if (auto && !tried && !midWork()) { applyUpdate(); return; }
+      document.getElementById('newVer').hidden = false;
+    }).catch(function () {});
+  }
+
   /* ================= 組み立て ================= */
   function init() {
     Store.init();
@@ -1802,9 +1836,14 @@
       navigator.serviceWorker.register('sw.js').catch(function () {});
     }
 
+    document.getElementById('newVer').onclick = applyUpdate;
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) checkVersion(true); });
+    setInterval(function () { if (!document.hidden) checkVersion(false); }, 30 * 60000);
+
     applySpace();
     show(Store.ui().view);
     Sync.start();
+    checkVersion(true);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
