@@ -296,7 +296,10 @@
     document.querySelectorAll('.view').forEach(function (s) { s.classList.toggle('on', s.id === 'view-' + v); });
     renderAll();
     global.scrollTo(0, 0);
-    if (v === 'apps' && !document.getElementById('apps-locked').hidden) document.getElementById('lockPass').focus();
+    if (v === 'apps' && !document.getElementById('apps-locked').hidden) {
+      // 生体認証を使っていれば、そのまま生体認証を出す（押した動きの中で呼ぶ必要がある）。使っていなければパスワードの欄へ
+      if (bioRec() && bioCan()) bioUnlock(); else document.getElementById('lockPass').focus();
+    }
   }
 
   function renderAll() {
@@ -985,6 +988,7 @@
          受け口へ送らない・受け口から受け取らない・控えに入れない・Obsidian に書き出さない（js/store.js）
          → 端末ごとに別々の一覧になる。パスワードも端末ごと
        ・app-lock … 鍵のもと（salt・回数）と、パスワードが合っているかを確かめる箱。1つだけ
+       ・app-bio … 生体認証で開けるための箱（使うと決めた端末にだけある。下の「生体認証で開ける」）
        ・app-xxxx … アプリ1つ。box に {name, url, group, order, qr} を暗号にして入れる。★暗号でない名称やURLは、端末にも持たない
            group … まとめる見出し（空でもよい）／order … 並び（足した順）
            qr … 自分で入れた QRコードの画像（無ければ、URL からその場で作る。js/qr.js。作った絵は残さない）
@@ -999,7 +1003,7 @@
     var h = Store.get(APPSP, 'app', LOCK_ID);
     return h && h.salt && h.box ? h : null;
   }
-  function appRecs() { return Store.list(APPSP, 'app').filter(function (r) { return r.id !== LOCK_ID; }); }
+  function appRecs() { return Store.list(APPSP, 'app').filter(function (r) { return r.id !== LOCK_ID && r.id !== BIO_ID; }); }
   function say(id, text, bad) {
     var el = document.getElementById(id);
     el.textContent = text || '';
@@ -1031,6 +1035,7 @@
   function renderApps() {
     var mode = appsMode();
     ['setup', 'locked', 'open', 'no'].forEach(function (m) { document.getElementById('apps-' + m).hidden = m !== mode; });
+    bioCheck(); paintBio();
     if (mode === 'open') refreshApps();
   }
 
@@ -1112,6 +1117,173 @@
     document.getElementById('appList').innerHTML = h;
     document.getElementById('appsCount').textContent = v.items.length ? v.items.length + '件' : '';
     document.getElementById('appGroups').innerHTML = Object.keys(by).map(function (g) { return '<option value="' + U.esc(g) + '">'; }).join('');
+  }
+
+  /* ---------- 生体認証で開ける（Face ID・Touch ID。2026-10-11 ko-dai さん） ----------
+     パスワードの代わりに、端末の生体認証で開ける。使うかどうかは端末ごとに選ぶ（使わなければ何も変わらない）
+       ・しくみ：端末にパスキーを1つ作る。生体認証が通ったときだけ、パスキーが32バイト（PRF）を返す。
+         その32バイトから鍵を作り、パスワードを包んで app-bio として端末の中（tb.apps）に置く。開けるときは逆の順
+       ・★包んだ箱だけでは開かない（生体認証を通さないと鍵が出てこない）。パスワードそのものは、いままでどおり残さない
+       ・★パスキーは、端末の「パスワード」の置き場（iCloud キーチェーンなど）に入る。ここだけは、アプリの外に記録が残る。
+         入るのは鍵の材料だけで、一覧もパスワードも入らない。使い始める前に、画面でそう断る
+       ・パスワードを変えた・決め直したら app-bio は捨てる（使い直してもらう）
+       ・PRF の使えない端末・ブラウザでは、ボタンを出さない／使い始めるときに断る */
+  var BIO_ID = 'app-bio', KEY_UID = 'tb.bio.uid';
+  var bioOk = null;                  // この端末で使えそうか（まだ調べていなければ null）
+
+  function bioRec() {
+    var h = lockHead(), b = Store.get(APPSP, 'app', BIO_ID);
+    return h && b && b.cred && b.psalt && b.box && b.lock === h.salt ? b : null;
+  }
+  function bioCan() { return !!(global.PublicKeyCredential && navigator.credentials && navigator.credentials.create); }
+  function bioCheck() {
+    if (bioOk !== null || !bioCan()) { if (bioOk === null) bioOk = false; return; }
+    var P = global.PublicKeyCredential;
+    bioOk = false;
+    Promise.resolve(P.isUserVerifyingPlatformAuthenticatorAvailable ? P.isUserVerifyingPlatformAuthenticatorAvailable() : true)
+      .then(function (ok) {
+        if (!ok) return false;
+        if (!P.getClientCapabilities) return true;       // 聞けないブラウザは、使い始めるときに確かめる
+        return P.getClientCapabilities().then(function (c) { return !c || c['extension:prf'] !== false; }, function () { return true; });
+      })
+      .then(function (ok) { bioOk = !!ok; if (view === 'apps') paintBio(); }, function () {});
+  }
+  function paintBio() {
+    var on = !!bioRec(), btn = document.getElementById('appsBio');
+    btn.hidden = !(on || bioOk);
+    btn.textContent = on ? '生体認証をやめる' : '生体認証を使う';
+    document.getElementById('lockBio').hidden = !(on && bioCan());
+  }
+  /** パスキーに付ける名前と番号。番号は端末ごとに1つ（使い直しても、パスキーが増えていかないように） */
+  function bioUser() {
+    var ua = navigator.userAgent, s = '';
+    var name = APP.name + ' 自作アプリ' + (/iPhone|iPad/.test(ua) ? '（iPhone）' : /Macintosh/.test(ua) ? '（Mac）' : '');
+    try { s = localStorage.getItem(KEY_UID) || ''; } catch (e) {}
+    if (!s) { s = Lock.b64(Lock.random(16)); try { localStorage.setItem(KEY_UID, s); } catch (e) {} }
+    return { id: Lock.unb64(s), name: name, displayName: name };
+  }
+  function prfOf(cred) {
+    var ext = cred && cred.getClientExtensionResults ? cred.getClientExtensionResults() : null;
+    var r = ext && ext.prf && ext.prf.results && ext.prf.results.first;
+    return r ? new Uint8Array(r) : null;
+  }
+  function bioSay(e) {
+    if (e && e.noPrf) return e.message;
+    if (e && e.name === 'NotAllowedError') return '生体認証が通りませんでした（やめた・時間切れ）';
+    return (e && e.message) || '生体認証でうまくいきませんでした';
+  }
+  /** 生体認証を通して、パスキーから32バイトをもらう */
+  function bioAsk(b) {
+    var one = { type: 'public-key', id: Lock.unb64(b.cred) };
+    if (b.tr && b.tr.length) one.transports = b.tr;
+    return navigator.credentials.get({ publicKey: {
+      challenge: Lock.random(32), rpId: location.hostname, timeout: 60000, userVerification: 'required',
+      allowCredentials: [one], extensions: { prf: { eval: { first: Lock.unb64(b.psalt) } } }
+    } }).then(function (c) {
+      var out = prfOf(c);
+      if (!out) { var e = new Error('この端末（またはブラウザ）では、生体認証での解除は使えません'); e.noPrf = true; throw e; }
+      return out;
+    });
+  }
+
+  function bioUnlock() {
+    var h = lockHead(), b = bioRec();
+    if (!h || !b || appsBusy || !bioCan()) return;
+    appsBusy = true;
+    say('lockMsg', '生体認証を待っています…');
+    bioAsk(b).then(Lock.keyFromBytes)
+      .then(function (k) { return Lock.open(k, b.box); })
+      .then(function (o) { return Lock.key(String(o.p), h.salt, h.iter); })
+      .then(function (key) { return Lock.open(key, h.box).then(function () { return key; }); })
+      .then(function (key) {
+        appsBusy = false;
+        say('lockMsg', '');
+        if (view !== 'apps') return;
+        vault = { key: key, salt: h.salt, items: [], bad: [], touched: Date.now() };
+        renderApps();
+      }, function (e) {
+        appsBusy = false;
+        say('lockMsg', (e && (e.noPrf || e.name === 'NotAllowedError') ? bioSay(e) : '生体認証では開けられませんでした') + '。パスワードでも開けられます', true);
+      });
+  }
+
+  /** 使い始める。パスワードを確かめる → パスキーを作る → 32バイトをもらって、パスワードを包む */
+  function bioSetup() {
+    var h = lockHead(), v = vault;
+    if (!h || !v) return;
+    var pass = '', made = null, stage = 'pass';
+    modal('<h2>生体認証で開けるようにする</h2>'
+      + '<div class="hint">次からは、パスワードの代わりに Face ID・Touch ID で開けられます（パスワードも、そのまま使えます）。<br>'
+      + '★この端末の「パスワード」の置き場に、パスキーが1つ保存されます（iCloud キーチェーンを使っていれば、そこにも入ります）。'
+      + '入るのは鍵の材料だけで、一覧の中身とパスワードは入りません。</div>'
+      + '<div class="f" id="bio-f"><label for="bio-pass">いまのパスワード</label><input type="password" id="bio-pass" autocomplete="current-password"></div>'
+      + '<div class="lockmsg" id="bio-msg"></div>'
+      + '<div class="acts"><button type="button" id="bio-cancel">やめる</button><button type="button" class="go" id="bio-ok">次へ</button></div>',
+      function (m) {
+        var btn = m.querySelector('#bio-ok');
+        function msg(text, bad) { var el = m.querySelector('#bio-msg'); el.textContent = text || ''; el.classList.toggle('bad', !!bad); }
+        function fail(e) { btn.disabled = false; msg(bioSay(e), true); }
+        function finish(prf) {
+          return Lock.keyFromBytes(prf).then(function (k) { return Lock.seal(k, { p: pass }); }).then(function (box) {
+            if (vault !== v || lockHead() !== h) throw new Error('ロックがかかりました');
+            Store.put(APPSP, 'app', { id: BIO_ID, createdAt: Date.now(), cred: made.cred, tr: made.tr, psalt: made.psalt, lock: h.salt, box: box });
+            pass = '';
+            closeModal(); renderAll(); toast('生体認証で開けられるようにしました');
+          });
+        }
+        m.querySelector('#bio-cancel').onclick = closeModal;
+        btn.onclick = function () {
+          if (stage === 'pass') {
+            pass = m.querySelector('#bio-pass').value;
+            if (!pass) return;
+            btn.disabled = true; msg('確かめています…');
+            Lock.key(pass, h.salt, h.iter).then(function (k) { return Lock.open(k, h.box); }).then(function () {
+              stage = 'make';
+              m.querySelector('#bio-pass').value = '';
+              m.querySelector('#bio-f').hidden = true;
+              btn.disabled = false; btn.textContent = '生体認証を登録する';
+              msg('パスワードを確かめました。下のボタンを押して、生体認証を登録してください');
+            }, function () { pass = ''; btn.disabled = false; msg('パスワードが違います', true); });
+            return;
+          }
+          btn.disabled = true; msg('生体認証を待っています…');
+          if (stage === 'check') { bioAsk(made).then(finish).catch(fail); return; }
+          var psalt = Lock.b64(Lock.random(32));
+          navigator.credentials.create({ publicKey: {
+            challenge: Lock.random(32), rp: { name: APP.name, id: location.hostname }, user: bioUser(),
+            pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+            authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'preferred', userVerification: 'required' },
+            timeout: 60000, attestation: 'none', extensions: { prf: { eval: { first: Lock.unb64(psalt) } } }
+          } }).then(function (c) {
+            var ext = c.getClientExtensionResults ? c.getClientExtensionResults() : null, prf = prfOf(c);
+            made = { cred: Lock.b64(new Uint8Array(c.rawId)), psalt: psalt, tr: (c.response && c.response.getTransports && c.response.getTransports()) || null };
+            if (prf) return finish(prf);
+            if (ext && ext.prf && ext.prf.enabled === false) {
+              var e = new Error('この端末（またはブラウザ）では、生体認証での解除は使えません。いま作られたパスキーは、端末の「パスワード」から消してください');
+              e.noPrf = true; throw e;
+            }
+            // 作ったときには32バイトを返さない端末がある（iPhone など）。続けてもう一度、生体認証でもらう。
+            // 押した動きが続いていないと断られる端末もあるので、だめならボタンを押し直してもらう
+            return bioAsk(made).then(finish, function (e2) {
+              if (e2 && e2.noPrf) throw e2;
+              stage = 'check';
+              btn.disabled = false; btn.textContent = 'もう一度、生体認証を通す';
+              msg('登録できました。仕上げに、もう一度だけ生体認証を通してください');
+            });
+          }).catch(fail);
+        };
+        setTimeout(function () { var el = m.querySelector('#bio-pass'); if (el) el.focus(); }, 50);
+      });
+    appsModal = true;
+  }
+
+  function bioToggle() {
+    if (!vault) return;
+    if (!bioRec()) { bioSetup(); return; }
+    if (!global.confirm('生体認証で開けるのをやめます（パスワードでは、そのまま開けられます）。\n\n'
+      + '端末の「パスワード」に保存されたパスキーは、アプリからは消せません。要らなければ、そこから消してください。')) return;
+    Store.remove(APPSP, 'app', BIO_ID);
+    renderAll(); toast('生体認証をやめました');
   }
 
   /* まちがえた回数（この端末の中だけ）。5回つづけてまちがえると、しばらく待たせる */
@@ -1430,7 +1602,11 @@
                 return { id: x.rec.id, createdAt: x.rec.createdAt, box: boxes[i + 1] };
               }).concat([{ id: LOCK_ID, createdAt: h.createdAt, salt: salt, iter: Lock.ITER, box: boxes[0] }]));
               v.key = key2; v.salt = salt;
-              closeModal(); renderAll(); toast('パスワードを変えました');
+              // 生体認証の箱は、前のパスワードを包んだものなので捨てる（使い直してもらう）
+              var hadBio = !!Store.get(APPSP, 'app', BIO_ID);
+              if (hadBio) Store.remove(APPSP, 'app', BIO_ID);
+              closeModal(); renderAll();
+              toast('パスワードを変えました' + (hadBio ? '（生体認証は、もう一度「使う」を押してください）' : ''));
             })
             .catch(function (e) {
               btn.disabled = false; btn.textContent = '変える';
@@ -1447,6 +1623,7 @@
       + 'ほかのどこにも残していないので、戻せません。\n\n消してよろしいですか？')) return;
     appRecs().forEach(function (r) { Store.remove(APPSP, 'app', r.id); });
     Store.remove(APPSP, 'app', LOCK_ID);
+    Store.remove(APPSP, 'app', BIO_ID);
     noteFail(true);
     lockApps();
     renderAll(); toast('一覧を消しました。パスワードを決め直せます');
@@ -1804,6 +1981,8 @@
     document.getElementById('appForm').addEventListener('submit', function (e) { e.preventDefault(); addApp(); });
     document.getElementById('appsBulk').onclick = bulkApps;
     document.getElementById('appsPass').onclick = changeAppsPass;
+    document.getElementById('appsBio').onclick = bioToggle;
+    document.getElementById('lockBio').onclick = bioUnlock;
     document.getElementById('appList').addEventListener('click', function (e) {
       var b = e.target.closest('[data-act]');
       if (!b || !vault) return;

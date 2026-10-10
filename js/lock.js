@@ -38,6 +38,18 @@
       });
     },
 
+    /** 生体認証（パスキー）が返す32バイトから、箱を開ける鍵を作る（js/app.js「生体認証で開ける」） */
+    keyFromBytes: function (bytes) {
+      return subtle.importKey('raw', bytes, 'HKDF', false, ['deriveKey']).then(function (base) {
+        return subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode('Task Board apps bio v1') },
+          base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      });
+    },
+
+    random: function (n) { return global.crypto.getRandomValues(new Uint8Array(n)); },
+    b64: b64,
+    unb64: unb64,
+
     /** 包む。返すのは「毎回ちがう頭の12バイト＋暗号」を文字にしたもの */
     seal: function (key, obj) {
       var iv = global.crypto.getRandomValues(new Uint8Array(12));

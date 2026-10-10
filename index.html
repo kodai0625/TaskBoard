@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=f639a53c">
+<link rel="stylesheet" href="css/style.css?v=c1c5fb28">
 </head>
 <body data-space="personal">
 
@@ -163,6 +163,7 @@
       <p>自作アプリの一覧を見るには、決めたパスワードを入れてください。</p>
       <input type="password" id="lockPass" autocomplete="current-password" aria-label="パスワード" placeholder="パスワード">
       <button type="submit" class="mini go" id="lockGo">開ける</button>
+      <button type="button" class="mini bio" id="lockBio" hidden>生体認証で開ける（Face ID・Touch ID）</button>
       <div class="lockmsg" id="lockMsg"></div>
       <button type="button" class="linkbtn" id="lockForgot">パスワードを忘れたとき</button>
     </form>
@@ -187,6 +188,7 @@
       <div class="appsfoot">
         <button type="button" class="mini" id="appsBulk">まとめて足す</button>
         <button type="button" class="mini" id="appsPass">パスワードを変える</button>
+        <button type="button" class="mini" id="appsBio" hidden>生体認証を使う</button>
       </div>
       <div class="note appsnote">この一覧は、この端末の中だけにあります（どこにも送りません・控えもありません）。<br>ほかのタブに移る・アプリを1分より長く閉じる・5分さわらない、のどれかでロックします。</div>
     </div>
@@ -210,11 +212,11 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=f639a53c"></script>
-<script src="js/store.js?v=f639a53c"></script>
-<script src="js/sync.js?v=f639a53c"></script>
-<script src="js/lock.js?v=f639a53c"></script>
-<script src="js/qr.js?v=f639a53c"></script>
-<script src="js/app.js?v=f639a53c"></script>
+<script src="js/config.js?v=c1c5fb28"></script>
+<script src="js/store.js?v=c1c5fb28"></script>
+<script src="js/sync.js?v=c1c5fb28"></script>
+<script src="js/lock.js?v=c1c5fb28"></script>
+<script src="js/qr.js?v=c1c5fb28"></script>
+<script src="js/app.js?v=c1c5fb28"></script>
 </body>
 </html>
