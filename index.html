@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=f9a103ff">
+<link rel="stylesheet" href="css/style.css?v=c01179c5">
 </head>
 <body data-space="personal">
 
@@ -40,7 +40,7 @@
     <button type="button" class="tab on" data-view="task">タスク <span class="cnt" id="cntTask"></span></button>
     <button type="button" class="tab" data-view="plan">予定</button>
     <button type="button" class="tab" data-view="memo">メモ <span class="cnt" id="cntMemo"></span></button>
-    <!-- 個人の側にだけ出る。中身はパスワードで暗号にして持つ（js/lock.js） -->
+    <!-- 個人の側にだけ出る。中身はパスワードで暗号にして、この端末の中だけに持つ（js/lock.js） -->
     <button type="button" class="tab" data-view="apps" id="tabApps"><svg class="lk" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="M17 9V7A5 5 0 0 0 7 7v2H5v12h14V9h-2Zm-8 0V7a3 3 0 0 1 6 0v2H9Z"/></svg>自作アプリ</button>
   </nav>
 </header>
@@ -151,7 +151,7 @@
       <button type="submit" class="mini go">決める</button>
       <div class="lockmsg" id="setMsg"></div>
       <ul class="locknote">
-        <li>iPhone と Mac で、同じパスワードを使います</li>
+        <li>一覧は、この端末の中だけに残します。どこにも送りません（ほかの端末には出ないので、端末ごとに入れます）</li>
         <li>★忘れると、中身は取り出せません（決め直すと一覧は消えます）</li>
         <li>英字と数字を混ぜた長めのものが安全です。誕生日は避けてください</li>
       </ul>
@@ -184,7 +184,7 @@
         <button type="button" class="mini" id="appsBulk">まとめて足す</button>
         <button type="button" class="mini" id="appsPass">パスワードを変える</button>
       </div>
-      <div class="note appsnote">ほかのタブに移る・アプリを1分より長く閉じる・5分さわらない、のどれかでロックします。</div>
+      <div class="note appsnote">この一覧は、この端末の中だけにあります（どこにも送りません・控えもありません）。<br>ほかのタブに移る・アプリを1分より長く閉じる・5分さわらない、のどれかでロックします。</div>
     </div>
 
     <div class="empty" id="apps-no" hidden>この開き方では暗号が使えないので、自作アプリの一覧は使えません。<br>公開しているページ（https://…）から開いてください。</div>
@@ -203,10 +203,10 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=f9a103ff"></script>
-<script src="js/store.js?v=f9a103ff"></script>
-<script src="js/sync.js?v=f9a103ff"></script>
-<script src="js/lock.js?v=f9a103ff"></script>
-<script src="js/app.js?v=f9a103ff"></script>
+<script src="js/config.js?v=c01179c5"></script>
+<script src="js/store.js?v=c01179c5"></script>
+<script src="js/sync.js?v=c01179c5"></script>
+<script src="js/lock.js?v=c01179c5"></script>
+<script src="js/app.js?v=c01179c5"></script>
 </body>
 </html>

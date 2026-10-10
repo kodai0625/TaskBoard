@@ -981,13 +981,13 @@
 
   /* ================= 自作アプリ（個人の側だけ・ロックつき。2026-10-11 ko-dai さんの願い） =================
      自分で作ったアプリの名称とURLの一覧。★中身は、決めたパスワードで暗号にして持つ（js/lock.js）
-       ・受け口の GAS は task と memo しか受けないので、memo として送る（貼り直し不要）。
-         印は src:'app'・id が app- で始まること。Store が見分けて、メモの一覧には出さない（js/store.js）
+       ・★どこにも記録を残さない（2026-10-11 ko-dai さん）。この端末の中（tb.apps）にだけ置く。
+         受け口へ送らない・受け口から受け取らない・控えに入れない・Obsidian に書き出さない（js/store.js）
+         → 端末ごとに別々の一覧になる。パスワードも端末ごと
        ・app-lock … 鍵のもと（salt・回数）と、パスワードが合っているかを確かめる箱。1つだけ
-       ・app-xxxx … アプリ1つ。box に {name, url} を暗号にして入れる。★暗号でない名称やURLは、記録に持たない
+       ・app-xxxx … アプリ1つ。box に {name, url} を暗号にして入れる。★暗号でない名称やURLは、端末にも持たない
        ・★パスワードと鍵は、残さない・送らない。開いている間だけ、下の vault の中にある
-       ・ほかのタブに移る／1分より長く裏に回る／5分さわらない → ロックする（開いた中身も画面から消す）
-       ・Obsidian へは書き出さない（書き出す.py が飛ばす）。Mac の道具には鍵が無いので、読めもしない */
+       ・ほかのタブに移る／1分より長く裏に回る／5分さわらない → ロックする（開いた中身も画面から消す） */
   var APPSP = 'personal', LOCK_ID = 'app-lock', KEY_FAIL = 'tb.applock.fail';
   var Lock = TB.Lock;
   var vault = null;          // 開いている間だけ { key, salt, items:[{id,name,url}], bad:[id], touched }
@@ -995,7 +995,7 @@
 
   function lockHead() {
     var h = Store.get(APPSP, 'app', LOCK_ID);
-    return h && !h.deleted && h.salt && h.box ? h : null;
+    return h && h.salt && h.box ? h : null;
   }
   function appRecs() { return Store.list(APPSP, 'app').filter(function (r) { return r.id !== LOCK_ID; }); }
   function say(id, text, bad) {
@@ -1018,7 +1018,7 @@
   function appsMode() {
     if (!Lock.ok()) return 'no';
     var h = lockHead();
-    // ほかの端末でパスワードを変えた・決め直したときは、いまの鍵では開かないのでロックに戻す
+    // 鍵のもとが替わっていたら（別の窓で変えた・決め直した）、いまの鍵では開かないのでロックに戻す
     if (vault && (!h || h.salt !== vault.salt)) lockApps();
     return !h ? 'setup' : vault ? 'open' : 'locked';
   }
@@ -1124,47 +1124,28 @@
     });
   }
 
-  /** 個人の側を、いま確かに同期する（ほかの同期が走っていたら終わるのを待つ） */
-  function syncPersonal(tries) {
-    return Sync.of[APPSP].run(true).then(function (r) {
-      if (r && r.skipped === 'busy' && (tries || 0) < 25) {
-        return new Promise(function (ok) { setTimeout(ok, 400); }).then(function () { return syncPersonal((tries || 0) + 1); });
-      }
-      return r;
-    });
-  }
-
   function setupApps() {
     var e1 = document.getElementById('setPass1'), e2 = document.getElementById('setPass2');
-    var p1 = e1.value, p2 = e2.value, STOP = {};
+    var p1 = e1.value, p2 = e2.value;
     if (appsBusy) return;
     if (p1.length < Lock.MIN) { say('setMsg', Lock.MIN + '文字以上にしてください', true); return; }
     if (p1 !== p2) { say('setMsg', '2回の入力が合っていません', true); return; }
     appsBusy = true;
     say('setMsg', '用意しています…');
-    // つないでいるなら、ほかの端末で先に決めていないかを確かめてから（別々に決めると、片方の中身が開かなくなる）
-    (Sync.enabled() ? syncPersonal() : Promise.resolve()).catch(function () {
-      if (!global.confirm('受け口につながらず、ほかの端末で先に決めていないかを確かめられませんでした。\n\n'
-        + 'まだどの端末でも決めていなければ、このまま決めて大丈夫です。\nこのまま決めますか？')) throw STOP;
-    }).then(function () {
-      if (lockHead()) { toast('ほかの端末で決めたパスワードがあります'); throw STOP; }
-      var salt = Lock.newSalt();
-      return Lock.key(p1, salt, Lock.ITER).then(function (key) {
-        return Lock.seal(key, { check: APP.name }).then(function (box) {
-          Store.put(APPSP, 'app', { id: LOCK_ID, createdAt: Date.now(), salt: salt, iter: Lock.ITER, box: box });
-          if (view === 'apps') vault = { key: key, salt: salt, items: [], bad: [], touched: Date.now() };
-          toast('ロックを用意しました');
-        });
+    var salt = Lock.newSalt();
+    Lock.key(p1, salt, Lock.ITER).then(function (key) {
+      return Lock.seal(key, { check: APP.name }).then(function (box) {
+        Store.put(APPSP, 'app', { id: LOCK_ID, createdAt: Date.now(), salt: salt, iter: Lock.ITER, box: box });
+        if (view === 'apps') vault = { key: key, salt: salt, items: [], bad: [], touched: Date.now() };
       });
     }).then(function () {
       appsBusy = false;
       e1.value = ''; e2.value = '';
       say('setMsg', '');
-      renderAll();
+      renderAll(); toast('ロックを用意しました');
     }, function (e) {
       appsBusy = false;
-      say('setMsg', e === STOP ? '' : 'うまくいきませんでした：' + ((e && e.message) || e), e !== STOP);
-      renderAll();
+      say('setMsg', 'うまくいきませんでした：' + ((e && e.message) || e), true);
     });
   }
 
@@ -1208,7 +1189,7 @@
         m.querySelector('#a-del').onclick = function () {
           Store.remove(APPSP, 'app', id);
           closeModal(); renderAll();
-          // 消した記録には中身を残さないので、戻すときは同じ名称とURLで入れ直す（開いている間だけ）
+          // 消したものはどこにも残らないので、戻すときは同じ名称とURLで入れ直す（開いている間だけ）
           toast('消しました', function () {
             putApp('', a.name, a.url).then(renderAll).catch(function (e) { toast(e.message || '戻せませんでした'); });
           });
@@ -1271,7 +1252,7 @@
       + '<div class="f"><label for="p-old">今のパスワード</label><input type="password" id="p-old" autocomplete="current-password"></div>'
       + '<div class="f"><label for="p-new">新しいパスワード（' + Lock.MIN + '文字以上）</label><input type="password" id="p-new" autocomplete="new-password"></div>'
       + '<div class="f"><label for="p-new2">もう一度</label><input type="password" id="p-new2" autocomplete="new-password"></div>'
-      + '<div class="hint">変えたあとは、ほかの端末でも新しいパスワードで開けます。</div>'
+      + '<div class="hint">変わるのは、この端末のパスワードだけです。</div>'
       + '<div class="acts"><button type="button" id="p-cancel">やめる</button><button type="button" class="go" id="p-ok">変える</button></div>',
       function (m) {
         m.querySelector('#p-cancel').onclick = closeModal;
@@ -1296,11 +1277,6 @@
             })
             .then(function (boxes) {
               if (vault !== v) throw new Error('ロックがかかりました');
-              // 包み直している間に、同期で中身が変わっていたらやり直す（古い鍵のままの1件を作らないため）
-              var now = appRecs();
-              if (lockHead() !== h || now.length !== recs.length || now.some(function (r, i) { return r !== recs[i]; })) {
-                throw new Error('途中で中身が変わりました。もう一度やり直してください');
-              }
               // ★ここから下は一息に書く（途中で止まると、鍵のもとと中身の組が合わなくなるため）
               kept.forEach(function (x, i) {
                 Store.put(APPSP, 'app', { id: x.rec.id, createdAt: x.rec.createdAt, box: boxes[i + 1] });
@@ -1320,8 +1296,8 @@
 
   /** パスワードを忘れたとき。暗号は開けられないので、一覧ごと消して決め直す */
   function resetApps() {
-    if (!global.confirm('パスワードを決め直します。\n\nいまの一覧（' + appRecs().length + '件）は、暗号を開けられないので全部消えます。戻せません。'
-      + (Sync.enabled() ? '\nつないでいるほかの端末からも消えます。' : '') + '\n\n消してよろしいですか？')) return;
+    if (!global.confirm('パスワードを決め直します。\n\nこの端末の一覧（' + appRecs().length + '件）は、暗号を開けられないので全部消えます。\n'
+      + 'ほかのどこにも残していないので、戻せません。\n\n消してよろしいですか？')) return;
     appRecs().forEach(function (r) { Store.remove(APPSP, 'app', r.id); });
     Store.remove(APPSP, 'app', LOCK_ID);
     noteFail(true);
@@ -1373,7 +1349,6 @@
       h += '<div class="setrow"><div><div class="k">' + U.esc(label(sp)) + '</div>'
         + '<div class="d">タスク ' + open + '件（済み ' + (tasks.length - open) + '件）・メモ ' + Store.list(sp, 'memo').length + '件'
         + (devN ? '・部署の残りの写し ' + devN + '件' : '')
-        + (sp === APPSP && appRecs().length ? '・自作アプリ ' + appRecs().length + '件（ロックつき）' : '')
         + '・' + (ss.kind === 'off' ? '端末の中だけ' : ss.kind === 'error' ? '送れていません' : ss.pending ? '未送信 ' + ss.pending + '件' : '同期ずみ')
         + '</div></div></div>';
     });
@@ -1384,7 +1359,7 @@
       + '<button type="button" class="mini" id="s-out">書き出す</button></div>'
       + '<div class="setrow"><div><div class="k">控えから戻す</div><div class="d">書き出した文字を貼って戻します</div></div>'
       + '<button type="button" class="mini" id="s-in">戻す</button></div>'
-      + '<div class="setrow"><div><div class="k">この端末から消す</div><div class="d">「' + U.esc(label()) + '」のタスクとメモ' + (space() === APPSP ? '（自作アプリの一覧も）' : '') + 'を、この端末から消します。'
+      + '<div class="setrow"><div><div class="k">この端末から消す</div><div class="d">「' + U.esc(label()) + '」のタスクとメモを、この端末から消します。'
       + (Sync.enabled() ? '受け口の記録は残るので、次の同期で戻ります' : '戻せません') + '</div></div>'
       + '<button type="button" class="mini danger" id="s-wipe">消す</button></div>'
       + '<div class="note" style="margin-top:6px">個人と会社の控えは、混ざらないように別々の1枚にしてあります。</div>'
@@ -1442,7 +1417,7 @@
     body.querySelector('#s-wipe').onclick = function () {
       var sp = space();
       if (Store.outboxCount(sp) && !global.confirm('まだ受け口に送っていない記録が ' + Store.outboxCount(sp) + '件あります。\n消すと、それは戻せません。')) return;
-      if (!global.confirm('「' + label() + '」のタスクとメモ' + (sp === APPSP ? '（自作アプリの一覧も）' : '') + 'を、この端末から全部消します。よろしいですか？')) return;
+      if (!global.confirm('「' + label() + '」のタスクとメモを、この端末から全部消します。よろしいですか？')) return;
       Store.wipe(sp);
       renderAll(); toast('消しました');
       schedulePush(sp);
