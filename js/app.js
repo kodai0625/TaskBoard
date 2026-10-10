@@ -985,12 +985,14 @@
          受け口へ送らない・受け口から受け取らない・控えに入れない・Obsidian に書き出さない（js/store.js）
          → 端末ごとに別々の一覧になる。パスワードも端末ごと
        ・app-lock … 鍵のもと（salt・回数）と、パスワードが合っているかを確かめる箱。1つだけ
-       ・app-xxxx … アプリ1つ。box に {name, url} を暗号にして入れる。★暗号でない名称やURLは、端末にも持たない
+       ・app-xxxx … アプリ1つ。box に {name, url, group, order, qr} を暗号にして入れる。★暗号でない名称やURLは、端末にも持たない
+           group … まとめる見出し（空でもよい）／order … 並び（足した順）
+           qr … 自分で入れた QRコードの画像（無ければ、URL からその場で作る。js/qr.js。作った絵は残さない）
        ・★パスワードと鍵は、残さない・送らない。開いている間だけ、下の vault の中にある
        ・ほかのタブに移る／1分より長く裏に回る／5分さわらない → ロックする（開いた中身も画面から消す） */
   var APPSP = 'personal', LOCK_ID = 'app-lock', KEY_FAIL = 'tb.applock.fail';
   var Lock = TB.Lock;
-  var vault = null;          // 開いている間だけ { key, salt, items:[{id,name,url}], bad:[id], touched }
+  var vault = null;          // 開いている間だけ { key, salt, items:[{id,name,url,group,order,qr}], bad:[id], touched }
   var appsBusy = false, appsModal = false, appsSeq = 0;
 
   function lockHead() {
@@ -1010,7 +1012,8 @@
     appsSeq++;
     document.getElementById('appList').innerHTML = '';
     document.getElementById('appsCount').textContent = '';
-    ['appName', 'appUrl', 'lockPass', 'setPass1', 'setPass2'].forEach(function (id) { document.getElementById(id).value = ''; });
+    document.getElementById('appGroups').innerHTML = '';
+    ['appGroup', 'appName', 'appUrl', 'lockPass', 'setPass1', 'setPass2'].forEach(function (id) { document.getElementById(id).value = ''; });
     say('lockMsg', ''); say('setMsg', '');
     if (appsModal) closeModal();
   }
@@ -1036,22 +1039,27 @@
     var v = vault, seq = ++appsSeq;
     return Promise.all(appRecs().map(function (r) {
       return Lock.open(v.key, r.box).then(function (o) {
-        return { id: r.id, name: String(o.name || ''), url: String(o.url || '') };
+        return {
+          id: r.id, name: String(o.name || ''), url: String(o.url || ''), group: String(o.group || ''),
+          order: Number(o.order) || r.createdAt || 0, qr: okQr(o.qr) ? o.qr : ''
+        };
       }, function () { return { id: r.id, bad: true }; });
     })).then(function (all) {
       if (vault !== v || seq !== appsSeq) return;
-      v.items = all.filter(function (a) { return !a.bad; })
-        .sort(function (a, b) { return a.name.localeCompare(b.name, 'ja'); });
+      v.items = all.filter(function (a) { return !a.bad; }).sort(function (a, b) { return a.order - b.order; });
       v.bad = all.filter(function (a) { return a.bad; }).map(function (a) { return a.id; });
       paintApps();
     });
   }
+  function findApp(id) { return vault && vault.items.filter(function (a) { return a.id === id; })[0]; }
 
   function okUrl(u) {
     try { var x = new URL(u); return (x.protocol === 'https:' || x.protocol === 'http:') && !!x.hostname; }
     catch (e) { return false; }
   }
   function normUrl(u) { u = String(u || '').trim(); return !u || /^https?:\/\//i.test(u) ? u : 'https://' + u; }
+  /** 入れた画像として出してよい形か（PNG か JPEG を文字にしたものだけ） */
+  function okQr(s) { return typeof s === 'string' && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/=]+$/.test(s); }
   /** 困りごとの文を返す。なければ '' */
   function checkApp(name, url) {
     if (!name) return '名称を入れてください';
@@ -1060,28 +1068,50 @@
     return '';
   }
 
+  function appRow(a) {
+    var ok = okUrl(a.url);                          // http・https のほかは、押せる形にしない
+    return '<div class="arow" data-id="' + U.esc(a.id) + '">'
+      + (ok ? '<a class="alink" href="' + U.esc(a.url) + '" target="_blank" rel="noopener noreferrer">' : '<span class="alink">')
+      + '<span class="aname">' + U.esc(a.name) + '</span>'
+      + '<span class="aurl">' + U.esc(a.url.replace(/^https?:\/\//i, '')) + '</span>'
+      + (ok ? '</a>' : '</span>')
+      + '<button type="button" class="abtn qr" data-act="qr" aria-label="QRコードを出す">QR</button>'
+      + '<button type="button" class="abtn" data-act="copy">コピー</button>'
+      + '<button type="button" class="abtn" data-act="aedit">直す</button>'
+      + '</div>';
+  }
+
   function paintApps() {
     var v = vault;
     if (!v) return;
-    var h = v.items.length
-      ? '<div class="card list">' + v.items.map(function (a) {
-          var ok = okUrl(a.url);                    // http・https のほかは、押せる形にしない
-          return '<div class="arow" data-id="' + U.esc(a.id) + '">'
-            + (ok ? '<a class="alink" href="' + U.esc(a.url) + '" target="_blank" rel="noopener noreferrer">' : '<span class="alink">')
-            + '<span class="aname">' + U.esc(a.name) + '</span>'
-            + '<span class="aurl">' + U.esc(a.url.replace(/^https?:\/\//i, '')) + '</span>'
-            + (ok ? '</a>' : '</span>')
-            + '<button type="button" class="abtn" data-act="copy">コピー</button>'
-            + '<button type="button" class="abtn" data-act="aedit">直す</button>'
-            + '</div>';
-        }).join('') + '</div>'
-      : '<div class="empty art">' + STAR + '<b>まだアプリはありません</b>上の欄に、名称とURLを書いて足してください</div>';
+    // 並びは足した順。同じグループのものは、最初の1件の場所にまとめる。グループの無いものは、続いている分を1枚に
+    var secs = [], by = Object.create(null);
+    v.items.forEach(function (a) {
+      var last = secs[secs.length - 1], sec;
+      if (a.group) {
+        sec = by[a.group];
+        if (!sec) { sec = by[a.group] = { group: a.group, items: [] }; secs.push(sec); }
+      } else if (last && !last.group) {
+        sec = last;
+      } else {
+        sec = { group: '', items: [] }; secs.push(sec);
+      }
+      sec.items.push(a);
+    });
+    var h = secs.map(function (sec) {
+      return (sec.group ? '<div class="agroup">' + U.esc(sec.group) + '<span>' + sec.items.length + '件</span></div>' : '')
+        + '<div class="card list">' + sec.items.map(appRow).join('') + '</div>';
+    }).join('');
+    if (!v.items.length) {
+      h = '<div class="empty art">' + STAR + '<b>まだアプリはありません</b>上の欄に、名称とURLを書いて足してください</div>';
+    }
     if (v.bad.length) {
       h += '<div class="warnbox">開けない項目が ' + v.bad.length + '件あります（ほかのパスワードで入れたものです）。'
         + ' <button type="button" class="mini danger" data-act="dropbad">消す</button></div>';
     }
     document.getElementById('appList').innerHTML = h;
     document.getElementById('appsCount').textContent = v.items.length ? v.items.length + '件' : '';
+    document.getElementById('appGroups').innerHTML = Object.keys(by).map(function (g) { return '<option value="' + U.esc(g) + '">'; }).join('');
   }
 
   /* まちがえた回数（この端末の中だけ）。5回つづけてまちがえると、しばらく待たせる */
@@ -1149,11 +1179,19 @@
     });
   }
 
-  /** 1件を暗号にして残す。id があれば、その1件を直す */
-  function putApp(id, name, url) {
+  /** 暗号にする前の形。空のものは入れない */
+  function appBody(o) {
+    var body = { name: o.name, url: o.url, order: o.order || Date.now() };
+    if (o.group) body.group = o.group;
+    if (okQr(o.qr)) body.qr = o.qr;
+    return body;
+  }
+
+  /** 1件を暗号にして残す。id があれば、その1件を直す。o は { name, url, group, order, qr } */
+  function putApp(id, o) {
     var v = vault;
     if (!v) return Promise.reject(new Error('ロックがかかっています'));
-    return Lock.seal(v.key, { name: name, url: url }).then(function (box) {
+    return Lock.seal(v.key, appBody(o)).then(function (box) {
       if (vault !== v) throw new Error('ロックがかかりました');
       var cur = id ? Store.get(APPSP, 'app', id) : null;
       var rec = { box: box };
@@ -1164,80 +1202,190 @@
 
   function addApp() {
     if (!vault) return;
-    var n = document.getElementById('appName'), u = document.getElementById('appUrl');
+    var g = document.getElementById('appGroup'), n = document.getElementById('appName'), u = document.getElementById('appUrl');
     var name = n.value.trim(), url = normUrl(u.value);
     if (name && !url) { u.focus(); return; }
     var bad = checkApp(name, url);
     if (bad) { toast(bad); (name ? u : n).focus(); return; }
-    putApp('', name, url).then(function () {
-      n.value = ''; u.value = '';
+    putApp('', { group: g.value.trim(), name: name, url: url }).then(function () {
+      n.value = ''; u.value = '';                  // グループは残す（同じグループに続けて足せるように）
       renderAll(); toast('足しました');
       n.focus();
     }).catch(function (e) { toast(e.message || '残せませんでした'); });
   }
 
+  /** 選んだ画像を、QRコード用に小さくして文字にする（長いほうを600までに。大きすぎるものは断る） */
+  function readQrImage(file) {
+    return new Promise(function (ok, ng) {
+      if (!/^image\//.test(file.type)) { ng(new Error('画像を選んでください')); return; }
+      var src = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(src);
+        var k = Math.min(1, 600 / Math.max(img.width, img.height));
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k));
+        c.height = Math.max(1, Math.round(img.height * k));
+        var g = c.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        var out = c.toDataURL('image/png');
+        if (out.length > 300000) out = c.toDataURL('image/jpeg', 0.85);
+        if (out.length > 400000 || !okQr(out)) { ng(new Error('画像が大きすぎて残せません')); return; }
+        ok(out);
+      };
+      img.onerror = function () { URL.revokeObjectURL(src); ng(new Error('画像を読めませんでした')); };
+      img.src = src;
+    });
+  }
+
   function editApp(id) {
-    var a = vault && vault.items.filter(function (x) { return x.id === id; })[0];
+    var a = findApp(id);
     if (!a) return;
+    var qr = a.qr;                                 // 自分で入れた画像。空なら URL から自動で作る
     modal('<h2>自作アプリ</h2>'
+      + '<div class="f"><label for="a-group">グループ（空でもよい）</label><input type="text" id="a-group" maxlength="40" list="appGroups" value="' + U.esc(a.group) + '"></div>'
       + '<div class="f"><label for="a-name">名称</label><input type="text" id="a-name" maxlength="80" value="' + U.esc(a.name) + '"></div>'
       + '<div class="f"><label for="a-url">URL</label><input type="text" id="a-url" maxlength="2000" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" value="' + U.esc(a.url) + '"></div>'
+      + '<div class="f"><label>QRコード</label><div class="qrpick"><img id="a-qrprev" alt="" hidden>'
+      + '<div><div class="qrkind" id="a-qrkind"></div><div class="qrbtns">'
+      + '<button type="button" class="mini" id="a-qrfile">画像を入れる</button>'
+      + '<button type="button" class="mini" id="a-qrauto">自動に戻す</button></div></div></div>'
+      + '<input type="file" id="a-qrinput" accept="image/*" hidden></div>'
       + '<div class="acts"><button type="button" class="del" id="a-del">消す</button>'
       + '<button type="button" id="a-cancel">やめる</button><button type="button" class="go" id="a-ok">直す</button></div>',
       function (m) {
+        function paintQr() {
+          var img = m.querySelector('#a-qrprev');
+          img.hidden = !qr;
+          if (qr) img.src = qr; else img.removeAttribute('src');
+          m.querySelector('#a-qrkind').textContent = qr ? '入れた画像を使います' : 'URLから自動で作ります（何もしなくて大丈夫です）';
+          m.querySelector('#a-qrauto').hidden = !qr;
+        }
+        paintQr();
+        m.querySelector('#a-qrfile').onclick = function () { m.querySelector('#a-qrinput').click(); };
+        m.querySelector('#a-qrinput').onchange = function () {
+          var f = this.files && this.files[0];
+          this.value = '';
+          if (f) readQrImage(f).then(function (d) { qr = d; paintQr(); }, function (e) { toast(e.message); });
+        };
+        m.querySelector('#a-qrauto').onclick = function () { qr = ''; paintQr(); };
         m.querySelector('#a-cancel').onclick = closeModal;
         m.querySelector('#a-del').onclick = function () {
           Store.remove(APPSP, 'app', id);
           closeModal(); renderAll();
-          // 消したものはどこにも残らないので、戻すときは同じ名称とURLで入れ直す（開いている間だけ）
+          // 消したものはどこにも残らないので、戻すときは同じ中身で入れ直す（開いている間だけ）
           toast('消しました', function () {
-            putApp('', a.name, a.url).then(renderAll).catch(function (e) { toast(e.message || '戻せませんでした'); });
+            putApp('', a).then(renderAll).catch(function (e) { toast(e.message || '戻せませんでした'); });
           });
         };
         m.querySelector('#a-ok').onclick = function () {
           var name = m.querySelector('#a-name').value.trim(), url = normUrl(m.querySelector('#a-url').value);
           var bad = checkApp(name, url);
           if (bad) { toast(bad); return; }
-          putApp(id, name, url).then(function () { closeModal(); renderAll(); })
+          putApp(id, { group: m.querySelector('#a-group').value.trim(), name: name, url: url, order: a.order, qr: qr })
+            .then(function () { closeModal(); renderAll(); })
             .catch(function (e) { toast(e.message || '残せませんでした'); });
         };
       });
     appsModal = true;
   }
 
-  /** 何件かを一度に足す。1行に「名称　URL」。同じURLがもうあるものは飛ばす */
+  /** QRコードを大きく出す。入れた画像があればそれを、無ければ URL からその場で作る（作った絵は残さない） */
+  function showQr(id) {
+    var a = findApp(id), src;
+    if (!a) return;
+    try { src = a.qr || TB.QR.dataUrl(a.url, 720); }
+    catch (e) { toast(e.message || 'QRコードを作れませんでした'); return; }
+    var title = (a.group ? a.group + '　' : '') + a.name;
+    modal('<h2>' + U.esc(title) + '</h2>'
+      + '<div class="qrbox"><img alt="' + U.esc(title) + ' のQRコード" src="' + src + '"></div>'
+      + '<div class="qrurl">' + U.esc(a.url) + '</div>'
+      + '<div class="hint qrhint">' + (a.qr ? '入れた画像を出しています。' : 'URLから自動で作ったQRコードです。') + '替えるときは「直す」から。</div>'
+      + '<div class="acts"><button type="button" id="q-close">閉じる</button><button type="button" class="go" id="q-save">画像を保存</button></div>',
+      function (m) {
+        m.querySelector('#q-close').onclick = closeModal;
+        m.querySelector('#q-save').onclick = function () { saveImage(src, 'QR_' + title.replace(/[\\\/:*?"<>|\s　]+/g, '_')); };
+      });
+    appsModal = true;
+  }
+
+  /** 画像を端末に渡す。スマホは共有の画面（写真に保存・AirDrop など）、パソコンはダウンロード */
+  function saveImage(dataUrl, name) {
+    var jpg = dataUrl.indexOf('data:image/jpeg') === 0, file = null;
+    name += jpg ? '.jpg' : '.png';
+    try {
+      var bin = atob(dataUrl.split(',')[1]), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      file = new File([bytes], name, { type: jpg ? 'image/jpeg' : 'image/png' });
+    } catch (e) { file = null; }
+    var touch = global.matchMedia && global.matchMedia('(pointer: coarse)').matches;
+    if (file && touch && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file] }).catch(function () {});
+      return;
+    }
+    var link = document.createElement('a');
+    link.href = dataUrl; link.download = name;
+    document.body.appendChild(link); link.click(); link.remove();
+  }
+
+  /** まとめて足す文字を読む。
+      ・「名称　URL」の行 … 1件。上にグループの行があれば、そのグループに入る
+      ・URLの無い行 … グループの見出し。空の行で、グループはおしまい
+      ・URLだけの行 … 上の行（見出し）を名称にする */
+  function parseApps(text) {
+    var items = [], bad = 0, group = '', used = false;
+    text.split('\n').forEach(function (line) {
+      line = line.trim().replace(/^[-・*■◆#]+\s*/, '');
+      if (!line) { group = ''; return; }
+      var hit = line.match(/^(?:(.+?)[\s　,、|｜:：]+)?(https?:\/\/\S+)$/i);
+      if (!hit) { group = line; used = false; return; }
+      var name = (hit[1] || '').trim(), g = group;
+      if (!name && group && !used) { name = group; g = ''; group = ''; }
+      if (checkApp(name, hit[2])) { bad++; return; }
+      if (g) used = true;
+      items.push({ group: g, name: name, url: hit[2] });
+    });
+    return { items: items, bad: bad };
+  }
+
+  /** 何件かを一度に足す。同じURLがもうあるものは、名称とグループを新しいほうに直す（QRの画像はそのまま） */
   function bulkApps() {
     var v = vault;
     if (!v) return;
     modal('<h2>まとめて足す</h2>'
-      + '<div class="hint">1行に1つ、「名称　URL」の順で書きます（間は空白）。同じURLがもうあるものは飛ばします。</div>'
-      + '<div class="f"><textarea id="b-text" rows="9" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="アプリの名称 https://…"></textarea></div>'
+      + '<div class="hint">1行に1つ、「名称　URL」の順で書きます（間は空白）。<br>'
+      + 'グループにまとめるときは、上の行にグループの名前だけを書き、終わりを空の行で区切ります。<br>'
+      + '同じURLがもうあるものは、名称とグループを新しいほうに直します。</div>'
+      + '<div class="f"><textarea id="b-text" rows="10" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="グループの名前&#10;名称 https://…&#10;名称 https://…"></textarea></div>'
       + '<div class="acts"><button type="button" id="b-cancel">やめる</button><button type="button" class="go" id="b-ok">足す</button></div>',
       function (m) {
         m.querySelector('#b-cancel').onclick = closeModal;
         m.querySelector('#b-ok').onclick = function () {
-          var have = {}, add = [], bad = 0, dup = 0;
-          v.items.forEach(function (a) { have[a.url] = true; });
-          m.querySelector('#b-text').value.split('\n').forEach(function (line) {
-            line = line.trim().replace(/^[-・*]\s*/, '');
-            if (!line) return;
-            var hit = line.match(/^(.+?)[\s　,、|｜:：]+(https?:\/\/\S+)$/i);
-            var name = hit ? hit[1].trim() : '', url = hit ? hit[2] : '';
-            if (checkApp(name, url)) { bad++; return; }
-            if (have[url]) { dup++; return; }
-            have[url] = true;
-            add.push({ name: name, url: url });
+          var read = parseApps(m.querySelector('#b-text').value), have = Object.create(null), seen = Object.create(null);
+          var todo = [], add = 0, fix = 0, base = Date.now();
+          v.items.forEach(function (a) { have[a.url] = a; });
+          read.items.forEach(function (it, i) {
+            if (seen[it.url]) return;
+            seen[it.url] = true;
+            var cur = have[it.url];
+            if (!cur) add++;
+            else if (cur.name !== it.name || cur.group !== it.group) fix++;
+            todo.push({ cur: cur, body: appBody({ group: it.group, name: it.name, url: it.url, order: base + i, qr: cur && cur.qr }) });
           });
-          if (!add.length) {
-            toast(bad ? '読めない行が ' + bad + '行あります（名称　URL の順で）' : dup ? 'もう全部入っています' : '中身が空です');
+          if (!add && !fix) {
+            toast(read.bad ? '読めない行が ' + read.bad + '行あります（名称　URL の順で）' : todo.length ? 'もう全部入っています' : '中身が空です');
             return;
           }
-          if (bad && !global.confirm('読めない行が ' + bad + '行あります。\n読めた ' + add.length + '件だけ足しますか？')) return;
-          Promise.all(add.map(function (a) { return Lock.seal(v.key, a); })).then(function (boxes) {
+          if (read.bad && !global.confirm('読めない行が ' + read.bad + '行あります。\n読めた分だけ足しますか？')) return;
+          Promise.all(todo.map(function (t) { return Lock.seal(v.key, t.body); })).then(function (boxes) {
             if (vault !== v) throw new Error('ロックがかかりました');
-            boxes.forEach(function (box) { Store.put(APPSP, 'app', { box: box }); });
+            Store.putApps(todo.map(function (t, i) {
+              var rec = { box: boxes[i] }, old = t.cur && Store.get(APPSP, 'app', t.cur.id);
+              if (old) { rec.id = old.id; rec.createdAt = old.createdAt; }
+              return rec;
+            }));
             closeModal(); renderAll();
-            toast(add.length + '件足しました' + (dup ? '（もうあった ' + dup + '件は飛ばしました）' : ''));
+            toast([add ? add + '件足しました' : '', fix ? fix + '件直しました' : ''].filter(Boolean).join('・'));
           }).catch(function (e) { toast(e.message || '残せませんでした'); });
         };
       });
@@ -1277,11 +1425,10 @@
             })
             .then(function (boxes) {
               if (vault !== v) throw new Error('ロックがかかりました');
-              // ★ここから下は一息に書く（途中で止まると、鍵のもとと中身の組が合わなくなるため）
-              kept.forEach(function (x, i) {
-                Store.put(APPSP, 'app', { id: x.rec.id, createdAt: x.rec.createdAt, box: boxes[i + 1] });
-              });
-              Store.put(APPSP, 'app', { id: LOCK_ID, createdAt: h.createdAt, salt: salt, iter: Lock.ITER, box: boxes[0] });
+              // ★鍵のもとと中身を、1回でまとめて書く（途中で止まると、組が合わなくなるため）
+              Store.putApps(kept.map(function (x, i) {
+                return { id: x.rec.id, createdAt: x.rec.createdAt, box: boxes[i + 1] };
+              }).concat([{ id: LOCK_ID, createdAt: h.createdAt, salt: salt, iter: Lock.ITER, box: boxes[0] }]));
               v.key = key2; v.salt = salt;
               closeModal(); renderAll(); toast('パスワードを変えました');
             })
@@ -1630,6 +1777,7 @@
       var row = b.closest('.arow');
       var a = row && vault.items.filter(function (x) { return x.id === row.dataset.id; })[0];
       if (!a) return;
+      if (b.dataset.act === 'qr') showQr(a.id);
       if (b.dataset.act === 'copy') copyText(a.url);
       if (b.dataset.act === 'aedit') editApp(a.id);
     });

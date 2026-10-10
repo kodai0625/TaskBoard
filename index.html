@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=c01179c5">
+<link rel="stylesheet" href="css/style.css?v=20fe5420">
 </head>
 <body data-space="personal">
 
@@ -145,7 +145,7 @@
     <form class="card lockbox" id="apps-setup" hidden>
       <svg class="lockart" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 9V7A5 5 0 0 0 7 7v2H5v12h14V9h-2Zm-8 0V7a3 3 0 0 1 6 0v2H9Zm3 4a1.6 1.6 0 0 1 .8 3v2h-1.6v-2a1.6 1.6 0 0 1 .8-3Z"/></svg>
       <h2>自作アプリの一覧</h2>
-      <p>自分で作ったアプリの名称とURLを、ロックをかけて残せます。<br>はじめに、このタブを開けるパスワードを決めてください。</p>
+      <p>自分で作ったアプリの名称・URL・QRコードを、ロックをかけて残せます。<br>はじめに、このタブを開けるパスワードを決めてください。</p>
       <input type="password" id="setPass1" autocomplete="new-password" aria-label="決めるパスワード" placeholder="パスワード（6文字以上）">
       <input type="password" id="setPass2" autocomplete="new-password" aria-label="もう一度" placeholder="もう一度">
       <button type="submit" class="mini go">決める</button>
@@ -173,12 +173,16 @@
         <button type="button" class="mini" id="appsLockBtn">ロックする</button>
       </div>
       <form class="appadd" id="appForm" autocomplete="off">
-        <input type="text" id="appName" maxlength="80" enterkeyhint="next" aria-label="アプリの名称" placeholder="アプリの名称">
+        <div class="appadd2">
+          <input type="text" id="appGroup" maxlength="40" list="appGroups" enterkeyhint="next" aria-label="グループ（空でもよい）" placeholder="グループ">
+          <input type="text" id="appName" maxlength="80" enterkeyhint="next" aria-label="名称" placeholder="名称">
+        </div>
         <div class="appadd2">
           <input type="text" id="appUrl" maxlength="2000" inputmode="url" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="URL" placeholder="https://…">
           <button type="submit" class="addgo" aria-label="足す">＋</button>
         </div>
       </form>
+      <datalist id="appGroups"></datalist>
       <div id="appList"></div>
       <div class="appsfoot">
         <button type="button" class="mini" id="appsBulk">まとめて足す</button>
@@ -203,10 +207,11 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=c01179c5"></script>
-<script src="js/store.js?v=c01179c5"></script>
-<script src="js/sync.js?v=c01179c5"></script>
-<script src="js/lock.js?v=c01179c5"></script>
-<script src="js/app.js?v=c01179c5"></script>
+<script src="js/config.js?v=20fe5420"></script>
+<script src="js/store.js?v=20fe5420"></script>
+<script src="js/sync.js?v=20fe5420"></script>
+<script src="js/lock.js?v=20fe5420"></script>
+<script src="js/qr.js?v=20fe5420"></script>
+<script src="js/app.js?v=20fe5420"></script>
 </body>
 </html>

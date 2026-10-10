@@ -157,15 +157,7 @@
     put: function (space, kind, rec) {
       check(space);
       var now = Date.now();
-      if (kind === 'app') {
-        // ★自作アプリの分は、送信箱に積まない（受け口へ送らない）。この端末の中に書くだけ
-        checkApp(space);
-        if (!rec.id) { rec.id = APP_PREFIX + newId(); rec.createdAt = now; }
-        rec.updatedAt = now;
-        apps[rec.id] = rec;
-        write(KEY_APPS, apps);
-        return rec;
-      }
+      if (kind === 'app') { checkApp(space); Store.putApps([rec]); return rec; }
       if (!rec.id) { rec.id = newId(); rec.createdAt = now; }
       rec.updatedAt = now;
       bags[space][kind][rec.id] = rec;
@@ -173,6 +165,21 @@
       save(space);
       Store.onWrite && Store.onWrite(space);
       return rec;
+    },
+
+    /** 自作アプリの分を、何件かまとめて書く。★送信箱に積まない（受け口へ送らない）。この端末の中に書くだけ。
+        1回で書くので、途中で止まって半分だけ書かれることがない。書けなかったら元に戻して知らせる */
+    putApps: function (recs) {
+      var now = Date.now(), before = JSON.stringify(apps);
+      recs.forEach(function (rec) {
+        if (!rec.id) { rec.id = APP_PREFIX + newId(); rec.createdAt = now; }
+        rec.updatedAt = now;
+        apps[rec.id] = rec;
+      });
+      if (!write(KEY_APPS, apps)) {
+        apps = JSON.parse(before);
+        throw new Error('端末の空きがなくて残せませんでした');
+      }
     },
 
     /** 消す（記録は残して deleted の印を付ける。受け口に「消した」を伝えるため） */
