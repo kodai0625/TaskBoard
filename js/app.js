@@ -203,6 +203,7 @@
     modalWrap.hidden = true;
     modalEl.innerHTML = '';
     document.body.style.overflow = '';
+    appsModal = false;
   }
 
   /* ---------- 知らせ（「もどす」を付けられる） ---------- */
@@ -260,6 +261,7 @@
     });
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', sp === 'work' ? '#4a3527' : '#2a2433');
+    document.getElementById('tabApps').hidden = sp !== APPSP;     // 自作アプリは個人の側だけ
     document.getElementById('taskInput').placeholder = label() + 'のタスクを足す';
     document.getElementById('memoInput').placeholder = label() + 'のメモを書く';
     var rule = sp === 'work'
@@ -276,7 +278,7 @@
     Store.ui().space = sp;
     Store.saveUi();
     applySpace();
-    renderAll();
+    if (view === 'apps') show(Store.ui().view); else renderAll();   // 自作アプリは個人の側だけ。出たらロックする
     toast(label() + 'に切り替えました');
   }
 
@@ -284,14 +286,17 @@
   var view = 'task';
   var lastView = 'task';
   function show(v) {
+    if (v === 'apps' && space() !== APPSP) v = 'task';
+    if (view === 'apps' && v !== 'apps') lockApps();
     if (view !== 'set') lastView = view;
     view = v;
-    if (v !== 'set') { Store.ui().view = v; Store.saveUi(); }
+    if (v !== 'set' && v !== 'apps') { Store.ui().view = v; Store.saveUi(); }
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.view === v); });
     document.getElementById('setBtn').classList.toggle('on', v === 'set');
     document.querySelectorAll('.view').forEach(function (s) { s.classList.toggle('on', s.id === 'view-' + v); });
     renderAll();
     global.scrollTo(0, 0);
+    if (v === 'apps' && !document.getElementById('apps-locked').hidden) document.getElementById('lockPass').focus();
   }
 
   function renderAll() {
@@ -300,6 +305,7 @@
     if (view === 'task') renderTasks();
     if (view === 'plan') renderPlan();
     if (view === 'memo') renderMemos();
+    if (view === 'apps') renderApps();
     if (view === 'set') renderSettings();
   }
 
@@ -973,6 +979,368 @@
     );
   }
 
+  /* ================= 自作アプリ（個人の側だけ・ロックつき。2026-10-11 ko-dai さんの願い） =================
+     自分で作ったアプリの名称とURLの一覧。★中身は、決めたパスワードで暗号にして持つ（js/lock.js）
+       ・受け口の GAS は task と memo しか受けないので、memo として送る（貼り直し不要）。
+         印は src:'app'・id が app- で始まること。Store が見分けて、メモの一覧には出さない（js/store.js）
+       ・app-lock … 鍵のもと（salt・回数）と、パスワードが合っているかを確かめる箱。1つだけ
+       ・app-xxxx … アプリ1つ。box に {name, url} を暗号にして入れる。★暗号でない名称やURLは、記録に持たない
+       ・★パスワードと鍵は、残さない・送らない。開いている間だけ、下の vault の中にある
+       ・ほかのタブに移る／1分より長く裏に回る／5分さわらない → ロックする（開いた中身も画面から消す）
+       ・Obsidian へは書き出さない（書き出す.py が飛ばす）。Mac の道具には鍵が無いので、読めもしない */
+  var APPSP = 'personal', LOCK_ID = 'app-lock', KEY_FAIL = 'tb.applock.fail';
+  var Lock = TB.Lock;
+  var vault = null;          // 開いている間だけ { key, salt, items:[{id,name,url}], bad:[id], touched }
+  var appsBusy = false, appsModal = false, appsSeq = 0;
+
+  function lockHead() {
+    var h = Store.get(APPSP, 'app', LOCK_ID);
+    return h && !h.deleted && h.salt && h.box ? h : null;
+  }
+  function appRecs() { return Store.list(APPSP, 'app').filter(function (r) { return r.id !== LOCK_ID; }); }
+  function say(id, text, bad) {
+    var el = document.getElementById(id);
+    el.textContent = text || '';
+    el.classList.toggle('bad', !!bad);
+  }
+
+  /** ロックする。鍵を捨て、開いた中身と、打ちかけの文字を画面から消す */
+  function lockApps() {
+    vault = null;
+    appsSeq++;
+    document.getElementById('appList').innerHTML = '';
+    document.getElementById('appsCount').textContent = '';
+    ['appName', 'appUrl', 'lockPass', 'setPass1', 'setPass2'].forEach(function (id) { document.getElementById(id).value = ''; });
+    say('lockMsg', ''); say('setMsg', '');
+    if (appsModal) closeModal();
+  }
+
+  function appsMode() {
+    if (!Lock.ok()) return 'no';
+    var h = lockHead();
+    // ほかの端末でパスワードを変えた・決め直したときは、いまの鍵では開かないのでロックに戻す
+    if (vault && (!h || h.salt !== vault.salt)) lockApps();
+    return !h ? 'setup' : vault ? 'open' : 'locked';
+  }
+
+  /* 形（決める／ロック中／開いている）を入れ替えるだけ。欄は index.html に置いてあるので、
+     同期で描き直しても、打ちかけのパスワードや名称は消えない */
+  function renderApps() {
+    var mode = appsMode();
+    ['setup', 'locked', 'open', 'no'].forEach(function (m) { document.getElementById('apps-' + m).hidden = m !== mode; });
+    if (mode === 'open') refreshApps();
+  }
+
+  /** 記録を全部開けて、一覧を描き直す。開かないもの（ほかのパスワードで入れたもの）は数だけ出す */
+  function refreshApps() {
+    var v = vault, seq = ++appsSeq;
+    return Promise.all(appRecs().map(function (r) {
+      return Lock.open(v.key, r.box).then(function (o) {
+        return { id: r.id, name: String(o.name || ''), url: String(o.url || '') };
+      }, function () { return { id: r.id, bad: true }; });
+    })).then(function (all) {
+      if (vault !== v || seq !== appsSeq) return;
+      v.items = all.filter(function (a) { return !a.bad; })
+        .sort(function (a, b) { return a.name.localeCompare(b.name, 'ja'); });
+      v.bad = all.filter(function (a) { return a.bad; }).map(function (a) { return a.id; });
+      paintApps();
+    });
+  }
+
+  function okUrl(u) {
+    try { var x = new URL(u); return (x.protocol === 'https:' || x.protocol === 'http:') && !!x.hostname; }
+    catch (e) { return false; }
+  }
+  function normUrl(u) { u = String(u || '').trim(); return !u || /^https?:\/\//i.test(u) ? u : 'https://' + u; }
+  /** 困りごとの文を返す。なければ '' */
+  function checkApp(name, url) {
+    if (!name) return '名称を入れてください';
+    if (!url) return 'URLを入れてください';
+    if (!okUrl(url)) return 'URLの形が違います（https://… の形で入れてください）';
+    return '';
+  }
+
+  function paintApps() {
+    var v = vault;
+    if (!v) return;
+    var h = v.items.length
+      ? '<div class="card list">' + v.items.map(function (a) {
+          var ok = okUrl(a.url);                    // http・https のほかは、押せる形にしない
+          return '<div class="arow" data-id="' + U.esc(a.id) + '">'
+            + (ok ? '<a class="alink" href="' + U.esc(a.url) + '" target="_blank" rel="noopener noreferrer">' : '<span class="alink">')
+            + '<span class="aname">' + U.esc(a.name) + '</span>'
+            + '<span class="aurl">' + U.esc(a.url.replace(/^https?:\/\//i, '')) + '</span>'
+            + (ok ? '</a>' : '</span>')
+            + '<button type="button" class="abtn" data-act="copy">コピー</button>'
+            + '<button type="button" class="abtn" data-act="aedit">直す</button>'
+            + '</div>';
+        }).join('') + '</div>'
+      : '<div class="empty art">' + STAR + '<b>まだアプリはありません</b>上の欄に、名称とURLを書いて足してください</div>';
+    if (v.bad.length) {
+      h += '<div class="warnbox">開けない項目が ' + v.bad.length + '件あります（ほかのパスワードで入れたものです）。'
+        + ' <button type="button" class="mini danger" data-act="dropbad">消す</button></div>';
+    }
+    document.getElementById('appList').innerHTML = h;
+    document.getElementById('appsCount').textContent = v.items.length ? v.items.length + '件' : '';
+  }
+
+  /* まちがえた回数（この端末の中だけ）。5回つづけてまちがえると、しばらく待たせる */
+  function failState() { try { return JSON.parse(localStorage.getItem(KEY_FAIL)) || {}; } catch (e) { return {}; } }
+  function waitLeft() { return Math.max(0, Math.ceil(((failState().until || 0) - Date.now()) / 1000)); }
+  function waitText(sec) { return sec < 60 ? sec + '秒' : Math.ceil(sec / 60) + '分'; }
+  function noteFail(ok) {
+    try {
+      if (ok) { localStorage.removeItem(KEY_FAIL); return; }
+      var f = failState();
+      f.n = (f.n || 0) + 1;
+      if (f.n >= 5) f.until = Date.now() + Math.min(10, f.n - 4) * 60000;
+      localStorage.setItem(KEY_FAIL, JSON.stringify(f));
+    } catch (e) {}
+  }
+
+  function unlockApps() {
+    var h = lockHead(), input = document.getElementById('lockPass'), pass = input.value;
+    if (!h || appsBusy || !pass) return;
+    var left = waitLeft();
+    if (left) { say('lockMsg', '何度もまちがえたので、あと' + waitText(left) + '待ってください', true); return; }
+    appsBusy = true;
+    say('lockMsg', '開けています…');
+    Lock.key(pass, h.salt, h.iter).then(function (key) {
+      return Lock.open(key, h.box).then(function () { return key; });
+    }).then(function (key) {
+      appsBusy = false;
+      noteFail(true);
+      input.value = '';
+      say('lockMsg', '');
+      if (view !== 'apps') return;                  // 待つ間にほかのタブへ移っていたら、開けない
+      vault = { key: key, salt: h.salt, items: [], bad: [], touched: Date.now() };
+      renderApps();
+    }, function () {
+      appsBusy = false;
+      noteFail(false);
+      var w = waitLeft();
+      say('lockMsg', 'パスワードが違います' + (w ? '。あと' + waitText(w) + '待ってください' : ''), true);
+      input.select();
+    });
+  }
+
+  /** 個人の側を、いま確かに同期する（ほかの同期が走っていたら終わるのを待つ） */
+  function syncPersonal(tries) {
+    return Sync.of[APPSP].run(true).then(function (r) {
+      if (r && r.skipped === 'busy' && (tries || 0) < 25) {
+        return new Promise(function (ok) { setTimeout(ok, 400); }).then(function () { return syncPersonal((tries || 0) + 1); });
+      }
+      return r;
+    });
+  }
+
+  function setupApps() {
+    var e1 = document.getElementById('setPass1'), e2 = document.getElementById('setPass2');
+    var p1 = e1.value, p2 = e2.value, STOP = {};
+    if (appsBusy) return;
+    if (p1.length < Lock.MIN) { say('setMsg', Lock.MIN + '文字以上にしてください', true); return; }
+    if (p1 !== p2) { say('setMsg', '2回の入力が合っていません', true); return; }
+    appsBusy = true;
+    say('setMsg', '用意しています…');
+    // つないでいるなら、ほかの端末で先に決めていないかを確かめてから（別々に決めると、片方の中身が開かなくなる）
+    (Sync.enabled() ? syncPersonal() : Promise.resolve()).catch(function () {
+      if (!global.confirm('受け口につながらず、ほかの端末で先に決めていないかを確かめられませんでした。\n\n'
+        + 'まだどの端末でも決めていなければ、このまま決めて大丈夫です。\nこのまま決めますか？')) throw STOP;
+    }).then(function () {
+      if (lockHead()) { toast('ほかの端末で決めたパスワードがあります'); throw STOP; }
+      var salt = Lock.newSalt();
+      return Lock.key(p1, salt, Lock.ITER).then(function (key) {
+        return Lock.seal(key, { check: APP.name }).then(function (box) {
+          Store.put(APPSP, 'app', { id: LOCK_ID, createdAt: Date.now(), salt: salt, iter: Lock.ITER, box: box });
+          if (view === 'apps') vault = { key: key, salt: salt, items: [], bad: [], touched: Date.now() };
+          toast('ロックを用意しました');
+        });
+      });
+    }).then(function () {
+      appsBusy = false;
+      e1.value = ''; e2.value = '';
+      say('setMsg', '');
+      renderAll();
+    }, function (e) {
+      appsBusy = false;
+      say('setMsg', e === STOP ? '' : 'うまくいきませんでした：' + ((e && e.message) || e), e !== STOP);
+      renderAll();
+    });
+  }
+
+  /** 1件を暗号にして残す。id があれば、その1件を直す */
+  function putApp(id, name, url) {
+    var v = vault;
+    if (!v) return Promise.reject(new Error('ロックがかかっています'));
+    return Lock.seal(v.key, { name: name, url: url }).then(function (box) {
+      if (vault !== v) throw new Error('ロックがかかりました');
+      var cur = id ? Store.get(APPSP, 'app', id) : null;
+      var rec = { box: box };
+      if (cur) { rec.id = id; rec.createdAt = cur.createdAt; }
+      Store.put(APPSP, 'app', rec);
+    });
+  }
+
+  function addApp() {
+    if (!vault) return;
+    var n = document.getElementById('appName'), u = document.getElementById('appUrl');
+    var name = n.value.trim(), url = normUrl(u.value);
+    if (name && !url) { u.focus(); return; }
+    var bad = checkApp(name, url);
+    if (bad) { toast(bad); (name ? u : n).focus(); return; }
+    putApp('', name, url).then(function () {
+      n.value = ''; u.value = '';
+      renderAll(); toast('足しました');
+      n.focus();
+    }).catch(function (e) { toast(e.message || '残せませんでした'); });
+  }
+
+  function editApp(id) {
+    var a = vault && vault.items.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+    modal('<h2>自作アプリ</h2>'
+      + '<div class="f"><label for="a-name">名称</label><input type="text" id="a-name" maxlength="80" value="' + U.esc(a.name) + '"></div>'
+      + '<div class="f"><label for="a-url">URL</label><input type="text" id="a-url" maxlength="2000" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" value="' + U.esc(a.url) + '"></div>'
+      + '<div class="acts"><button type="button" class="del" id="a-del">消す</button>'
+      + '<button type="button" id="a-cancel">やめる</button><button type="button" class="go" id="a-ok">直す</button></div>',
+      function (m) {
+        m.querySelector('#a-cancel').onclick = closeModal;
+        m.querySelector('#a-del').onclick = function () {
+          Store.remove(APPSP, 'app', id);
+          closeModal(); renderAll();
+          // 消した記録には中身を残さないので、戻すときは同じ名称とURLで入れ直す（開いている間だけ）
+          toast('消しました', function () {
+            putApp('', a.name, a.url).then(renderAll).catch(function (e) { toast(e.message || '戻せませんでした'); });
+          });
+        };
+        m.querySelector('#a-ok').onclick = function () {
+          var name = m.querySelector('#a-name').value.trim(), url = normUrl(m.querySelector('#a-url').value);
+          var bad = checkApp(name, url);
+          if (bad) { toast(bad); return; }
+          putApp(id, name, url).then(function () { closeModal(); renderAll(); })
+            .catch(function (e) { toast(e.message || '残せませんでした'); });
+        };
+      });
+    appsModal = true;
+  }
+
+  /** 何件かを一度に足す。1行に「名称　URL」。同じURLがもうあるものは飛ばす */
+  function bulkApps() {
+    var v = vault;
+    if (!v) return;
+    modal('<h2>まとめて足す</h2>'
+      + '<div class="hint">1行に1つ、「名称　URL」の順で書きます（間は空白）。同じURLがもうあるものは飛ばします。</div>'
+      + '<div class="f"><textarea id="b-text" rows="9" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="アプリの名称 https://…"></textarea></div>'
+      + '<div class="acts"><button type="button" id="b-cancel">やめる</button><button type="button" class="go" id="b-ok">足す</button></div>',
+      function (m) {
+        m.querySelector('#b-cancel').onclick = closeModal;
+        m.querySelector('#b-ok').onclick = function () {
+          var have = {}, add = [], bad = 0, dup = 0;
+          v.items.forEach(function (a) { have[a.url] = true; });
+          m.querySelector('#b-text').value.split('\n').forEach(function (line) {
+            line = line.trim().replace(/^[-・*]\s*/, '');
+            if (!line) return;
+            var hit = line.match(/^(.+?)[\s　,、|｜:：]+(https?:\/\/\S+)$/i);
+            var name = hit ? hit[1].trim() : '', url = hit ? hit[2] : '';
+            if (checkApp(name, url)) { bad++; return; }
+            if (have[url]) { dup++; return; }
+            have[url] = true;
+            add.push({ name: name, url: url });
+          });
+          if (!add.length) {
+            toast(bad ? '読めない行が ' + bad + '行あります（名称　URL の順で）' : dup ? 'もう全部入っています' : '中身が空です');
+            return;
+          }
+          if (bad && !global.confirm('読めない行が ' + bad + '行あります。\n読めた ' + add.length + '件だけ足しますか？')) return;
+          Promise.all(add.map(function (a) { return Lock.seal(v.key, a); })).then(function (boxes) {
+            if (vault !== v) throw new Error('ロックがかかりました');
+            boxes.forEach(function (box) { Store.put(APPSP, 'app', { box: box }); });
+            closeModal(); renderAll();
+            toast(add.length + '件足しました' + (dup ? '（もうあった ' + dup + '件は飛ばしました）' : ''));
+          }).catch(function (e) { toast(e.message || '残せませんでした'); });
+        };
+      });
+    appsModal = true;
+  }
+
+  /** パスワードを変える。新しい鍵で、鍵のもとと中身を全部包み直す */
+  function changeAppsPass() {
+    var h = lockHead(), v = vault;
+    if (!h || !v) return;
+    modal('<h2>パスワードを変える</h2>'
+      + '<div class="f"><label for="p-old">今のパスワード</label><input type="password" id="p-old" autocomplete="current-password"></div>'
+      + '<div class="f"><label for="p-new">新しいパスワード（' + Lock.MIN + '文字以上）</label><input type="password" id="p-new" autocomplete="new-password"></div>'
+      + '<div class="f"><label for="p-new2">もう一度</label><input type="password" id="p-new2" autocomplete="new-password"></div>'
+      + '<div class="hint">変えたあとは、ほかの端末でも新しいパスワードで開けます。</div>'
+      + '<div class="acts"><button type="button" id="p-cancel">やめる</button><button type="button" class="go" id="p-ok">変える</button></div>',
+      function (m) {
+        m.querySelector('#p-cancel').onclick = closeModal;
+        m.querySelector('#p-ok').onclick = function () {
+          var old = m.querySelector('#p-old').value, p1 = m.querySelector('#p-new').value, p2 = m.querySelector('#p-new2').value;
+          if (p1.length < Lock.MIN) { toast(Lock.MIN + '文字以上にしてください'); return; }
+          if (p1 !== p2) { toast('2回の入力が合っていません'); return; }
+          var btn = this, recs = appRecs(), salt = Lock.newSalt(), key2 = null, kept = [];
+          btn.disabled = true; btn.textContent = '変えています…';
+          Lock.key(old, h.salt, h.iter).then(function (k) { return Lock.open(k, h.box); })
+            .then(null, function () { throw new Error('今のパスワードが違います'); })
+            .then(function () {
+              // いまの鍵で開くものだけを包み直す（開かないものは、そのまま残る）
+              return Promise.all(recs.map(function (r) {
+                return Lock.open(v.key, r.box).then(function (o) { kept.push({ rec: r, o: o }); }, function () {});
+              }));
+            })
+            .then(function () { return Lock.key(p1, salt, Lock.ITER); })
+            .then(function (k) {
+              key2 = k;
+              return Promise.all([Lock.seal(k, { check: APP.name })].concat(kept.map(function (x) { return Lock.seal(k, x.o); })));
+            })
+            .then(function (boxes) {
+              if (vault !== v) throw new Error('ロックがかかりました');
+              // 包み直している間に、同期で中身が変わっていたらやり直す（古い鍵のままの1件を作らないため）
+              var now = appRecs();
+              if (lockHead() !== h || now.length !== recs.length || now.some(function (r, i) { return r !== recs[i]; })) {
+                throw new Error('途中で中身が変わりました。もう一度やり直してください');
+              }
+              // ★ここから下は一息に書く（途中で止まると、鍵のもとと中身の組が合わなくなるため）
+              kept.forEach(function (x, i) {
+                Store.put(APPSP, 'app', { id: x.rec.id, createdAt: x.rec.createdAt, box: boxes[i + 1] });
+              });
+              Store.put(APPSP, 'app', { id: LOCK_ID, createdAt: h.createdAt, salt: salt, iter: Lock.ITER, box: boxes[0] });
+              v.key = key2; v.salt = salt;
+              closeModal(); renderAll(); toast('パスワードを変えました');
+            })
+            .catch(function (e) {
+              btn.disabled = false; btn.textContent = '変える';
+              toast(e.message || '変えられませんでした');
+            });
+        };
+      });
+    appsModal = true;
+  }
+
+  /** パスワードを忘れたとき。暗号は開けられないので、一覧ごと消して決め直す */
+  function resetApps() {
+    if (!global.confirm('パスワードを決め直します。\n\nいまの一覧（' + appRecs().length + '件）は、暗号を開けられないので全部消えます。戻せません。'
+      + (Sync.enabled() ? '\nつないでいるほかの端末からも消えます。' : '') + '\n\n消してよろしいですか？')) return;
+    appRecs().forEach(function (r) { Store.remove(APPSP, 'app', r.id); });
+    Store.remove(APPSP, 'app', LOCK_ID);
+    noteFail(true);
+    lockApps();
+    renderAll(); toast('一覧を消しました。パスワードを決め直せます');
+  }
+
+  function dropBadApps() {
+    if (!vault || !vault.bad.length) return;
+    if (!global.confirm('開けない ' + vault.bad.length + '件を消します。中身は確かめられません。よろしいですか？')) return;
+    vault.bad.forEach(function (id) { Store.remove(APPSP, 'app', id); });
+    renderAll(); toast('消しました');
+  }
+
+  function copyText(text) {
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+      .then(function () { toast('コピーしました'); }, function () { toast('コピーできませんでした'); });
+  }
+
   /* ================= 設定 ================= */
   function renderSettings() {
     var h = '';
@@ -1005,6 +1373,7 @@
       h += '<div class="setrow"><div><div class="k">' + U.esc(label(sp)) + '</div>'
         + '<div class="d">タスク ' + open + '件（済み ' + (tasks.length - open) + '件）・メモ ' + Store.list(sp, 'memo').length + '件'
         + (devN ? '・部署の残りの写し ' + devN + '件' : '')
+        + (sp === APPSP && appRecs().length ? '・自作アプリ ' + appRecs().length + '件（ロックつき）' : '')
         + '・' + (ss.kind === 'off' ? '端末の中だけ' : ss.kind === 'error' ? '送れていません' : ss.pending ? '未送信 ' + ss.pending + '件' : '同期ずみ')
         + '</div></div></div>';
     });
@@ -1015,7 +1384,7 @@
       + '<button type="button" class="mini" id="s-out">書き出す</button></div>'
       + '<div class="setrow"><div><div class="k">控えから戻す</div><div class="d">書き出した文字を貼って戻します</div></div>'
       + '<button type="button" class="mini" id="s-in">戻す</button></div>'
-      + '<div class="setrow"><div><div class="k">この端末から消す</div><div class="d">「' + U.esc(label()) + '」のタスクとメモを、この端末から消します。'
+      + '<div class="setrow"><div><div class="k">この端末から消す</div><div class="d">「' + U.esc(label()) + '」のタスクとメモ' + (space() === APPSP ? '（自作アプリの一覧も）' : '') + 'を、この端末から消します。'
       + (Sync.enabled() ? '受け口の記録は残るので、次の同期で戻ります' : '戻せません') + '</div></div>'
       + '<button type="button" class="mini danger" id="s-wipe">消す</button></div>'
       + '<div class="note" style="margin-top:6px">個人と会社の控えは、混ざらないように別々の1枚にしてあります。</div>'
@@ -1073,7 +1442,7 @@
     body.querySelector('#s-wipe').onclick = function () {
       var sp = space();
       if (Store.outboxCount(sp) && !global.confirm('まだ受け口に送っていない記録が ' + Store.outboxCount(sp) + '件あります。\n消すと、それは戻せません。')) return;
-      if (!global.confirm('「' + label() + '」のタスクとメモを、この端末から全部消します。よろしいですか？')) return;
+      if (!global.confirm('「' + label() + '」のタスクとメモ' + (sp === APPSP ? '（自作アプリの一覧も）' : '') + 'を、この端末から全部消します。よろしいですか？')) return;
       Store.wipe(sp);
       renderAll(); toast('消しました');
       schedulePush(sp);
@@ -1270,6 +1639,41 @@
       var c = e.target.closest('.memo');
       if (c) editMemo(c.dataset.id);
     });
+
+    /* 自作アプリ */
+    document.getElementById('apps-setup').addEventListener('submit', function (e) { e.preventDefault(); setupApps(); });
+    document.getElementById('apps-locked').addEventListener('submit', function (e) { e.preventDefault(); unlockApps(); });
+    document.getElementById('lockForgot').onclick = resetApps;
+    document.getElementById('appsLockBtn').onclick = function () { lockApps(); renderApps(); toast('ロックしました'); };
+    document.getElementById('appForm').addEventListener('submit', function (e) { e.preventDefault(); addApp(); });
+    document.getElementById('appsBulk').onclick = bulkApps;
+    document.getElementById('appsPass').onclick = changeAppsPass;
+    document.getElementById('appList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act]');
+      if (!b || !vault) return;
+      if (b.dataset.act === 'dropbad') { dropBadApps(); return; }
+      var row = b.closest('.arow');
+      var a = row && vault.items.filter(function (x) { return x.id === row.dataset.id; })[0];
+      if (!a) return;
+      if (b.dataset.act === 'copy') copyText(a.url);
+      if (b.dataset.act === 'aedit') editApp(a.id);
+    });
+    // 裏に回って1分より長くたったら／5分さわらなかったら、ロックする
+    var hiddenAt = 0;
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      if (vault && hiddenAt && Date.now() - hiddenAt > 60000) { lockApps(); if (view === 'apps') renderApps(); }
+    });
+    ['pointerdown', 'keydown'].forEach(function (ev) {
+      document.addEventListener(ev, function () { if (vault) vault.touched = Date.now(); }, true);
+    });
+    setInterval(function () {
+      if (vault && Date.now() - vault.touched > 5 * 60000) {
+        lockApps();
+        if (view === 'apps') renderApps();
+        toast('自作アプリをロックしました');
+      }
+    }, 15000);
 
     if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
       navigator.serviceWorker.register('sw.js').catch(function () {});

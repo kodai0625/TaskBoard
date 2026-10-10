@@ -227,7 +227,7 @@ main{max-width:640px; margin:0 auto}
 .modal h2{margin:0 0 12px; font-size:16px}
 .f{margin-bottom:12px}
 .f label{display:block; font-size:12px; color:var(--dim); margin-bottom:4px}
-.f input[type=text],.f input[type=date],.f textarea{
+.f input[type=text],.f input[type=password],.f input[type=date],.f textarea{
   width:100%; padding:10px; border:1px solid var(--line); border-radius:10px;
   background:var(--card); color:var(--ink); font-size:16px;
 }
@@ -424,3 +424,53 @@ main{max-width:640px; margin:0 auto}
 .nowline::before{content:""; position:absolute; left:-5px; top:-6px; width:10px; height:10px; border-radius:50%; background:var(--danger)}
 .nowline span{position:absolute; right:2px; top:-17px; font-size:10.5px; font-weight:700; color:var(--danger); background:var(--paper); padding:0 4px; border-radius:4px}
 .plannote{margin-top:6px; text-align:center}
+
+
+/* ================================================================
+   自作アプリ（個人の側だけ・ロックつき。2026-10-11）
+   ================================================================ */
+.tab{white-space:nowrap}
+.tab .lk{margin-right:3px; vertical-align:-1px; opacity:.85}
+
+/* 決める・ロック中の箱（アイコンと同じ、濃い紫の丸に金の錠） */
+.lockbox{
+  display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center;
+  padding:26px 18px 20px; margin-top:8px; position:relative; overflow:hidden;
+  border-top:3px solid var(--gold2);
+  background:linear-gradient(160deg,var(--card) 60%,var(--gold-soft));
+}
+.lockbox::after{content:"✦"; position:absolute; right:12px; top:-8px; font-size:54px; line-height:1; color:var(--gold); opacity:.14; pointer-events:none}
+.lockart{width:50px; height:50px; padding:12px; border-radius:50%; color:#d8b77b; background:#2a2433; box-shadow:0 0 0 1px rgba(216,183,123,.5), var(--shadow)}
+.lockbox h2{margin:2px 0 0; font-size:16.5px; font-family:"Hiragino Mincho ProN","Yu Mincho",YuMincho,Georgia,serif; font-weight:600; letter-spacing:.05em}
+.lockbox p{margin:0; font-size:13px; color:var(--dim); line-height:1.7}
+.lockbox input[type=password]{
+  width:100%; max-width:300px; padding:11px 12px; border:1px solid var(--line); border-radius:12px;
+  background:var(--card); color:var(--ink); font-size:16px; text-align:center;
+}
+.lockbox input[type=password]:focus,.appadd input:focus{outline:2px solid var(--accent); outline-offset:-1px}
+.lockbox .mini.go{width:100%; max-width:300px; font-size:14px}
+.lockmsg{font-size:12.5px; color:var(--dim); min-height:1.6em}
+.lockmsg.bad{color:var(--danger); font-weight:600}
+.locknote{margin:2px 0 0; padding:0 0 0 1.2em; text-align:left; font-size:11.5px; color:var(--dim); line-height:1.8; max-width:300px}
+.linkbtn{border:0; background:none; color:var(--dim); font-size:12px; text-decoration:underline; padding:4px}
+
+/* 開いているとき */
+.appsbar{display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 2px 8px}
+.appsst{display:flex; align-items:center; gap:5px; font-size:12.5px; color:var(--ok); font-weight:600}
+.appsst b{color:var(--dim); font-weight:400}
+.appadd{display:flex; flex-direction:column; gap:6px; margin-bottom:10px}
+.appadd input{
+  min-width:0; padding:11px 12px; border:1px solid var(--line); border-radius:12px;
+  background:var(--card); color:var(--ink); font-size:16px; box-shadow:var(--shadow);
+}
+.appadd2{display:flex; gap:8px}
+.appadd2 input{flex:1}
+.arow{display:flex; align-items:center; gap:6px; padding:0 8px 0 12px; border-bottom:1px solid var(--line)}
+.arow:last-child{border-bottom:0}
+.alink{flex:1; min-width:0; display:block; padding:10px 0; color:var(--ink); text-decoration:none}
+.aname{display:block; font-size:15px; font-weight:600; line-height:1.4; word-break:break-word}
+a.alink .aname::after{content:" ↗"; color:var(--gold); font-weight:400; font-size:12px}
+.aurl{display:block; font-size:11.5px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.abtn{flex:0 0 auto; border:1px solid var(--line); background:var(--card); color:var(--dim); border-radius:999px; padding:4px 10px; font-size:12px; white-space:nowrap}
+.appsfoot{display:flex; gap:8px; justify-content:flex-end; margin:12px 2px 6px}
+.appsnote{font-size:11.5px; text-align:right; margin:0 4px}

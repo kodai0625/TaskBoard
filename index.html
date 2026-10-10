@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=7dde5aa2">
+<link rel="stylesheet" href="css/style.css?v=f9a103ff">
 </head>
 <body data-space="personal">
 
@@ -40,6 +40,8 @@
     <button type="button" class="tab on" data-view="task">タスク <span class="cnt" id="cntTask"></span></button>
     <button type="button" class="tab" data-view="plan">予定</button>
     <button type="button" class="tab" data-view="memo">メモ <span class="cnt" id="cntMemo"></span></button>
+    <!-- 個人の側にだけ出る。中身はパスワードで暗号にして持つ（js/lock.js） -->
+    <button type="button" class="tab" data-view="apps" id="tabApps"><svg class="lk" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="M17 9V7A5 5 0 0 0 7 7v2H5v12h14V9h-2Zm-8 0V7a3 3 0 0 1 6 0v2H9Z"/></svg>自作アプリ</button>
   </nav>
 </header>
 
@@ -136,6 +138,58 @@
     <div id="memoList"></div>
   </section>
 
+  <!-- ============ 自作アプリ（個人の側だけ・ロックつき） ============
+       形は3つ。まだパスワードを決めていない／ロック中／開いている。js/app.js がどれか1つだけ出す -->
+  <section id="view-apps" class="view">
+
+    <form class="card lockbox" id="apps-setup" hidden>
+      <svg class="lockart" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 9V7A5 5 0 0 0 7 7v2H5v12h14V9h-2Zm-8 0V7a3 3 0 0 1 6 0v2H9Zm3 4a1.6 1.6 0 0 1 .8 3v2h-1.6v-2a1.6 1.6 0 0 1 .8-3Z"/></svg>
+      <h2>自作アプリの一覧</h2>
+      <p>自分で作ったアプリの名称とURLを、ロックをかけて残せます。<br>はじめに、このタブを開けるパスワードを決めてください。</p>
+      <input type="password" id="setPass1" autocomplete="new-password" aria-label="決めるパスワード" placeholder="パスワード（6文字以上）">
+      <input type="password" id="setPass2" autocomplete="new-password" aria-label="もう一度" placeholder="もう一度">
+      <button type="submit" class="mini go">決める</button>
+      <div class="lockmsg" id="setMsg"></div>
+      <ul class="locknote">
+        <li>iPhone と Mac で、同じパスワードを使います</li>
+        <li>★忘れると、中身は取り出せません（決め直すと一覧は消えます）</li>
+        <li>英字と数字を混ぜた長めのものが安全です。誕生日は避けてください</li>
+      </ul>
+    </form>
+
+    <form class="card lockbox" id="apps-locked" hidden>
+      <svg class="lockart" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 9V7A5 5 0 0 0 7 7v2H5v12h14V9h-2Zm-8 0V7a3 3 0 0 1 6 0v2H9Zm3 4a1.6 1.6 0 0 1 .8 3v2h-1.6v-2a1.6 1.6 0 0 1 .8-3Z"/></svg>
+      <h2>ロックがかかっています</h2>
+      <p>自作アプリの一覧を見るには、決めたパスワードを入れてください。</p>
+      <input type="password" id="lockPass" autocomplete="current-password" aria-label="パスワード" placeholder="パスワード">
+      <button type="submit" class="mini go" id="lockGo">開ける</button>
+      <div class="lockmsg" id="lockMsg"></div>
+      <button type="button" class="linkbtn" id="lockForgot">パスワードを忘れたとき</button>
+    </form>
+
+    <div id="apps-open" hidden>
+      <div class="appsbar">
+        <span class="appsst"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M17 9h2v12H5V9h10V7a3 3 0 0 0-5.9-.8L7.2 5.6A5 5 0 0 1 17 7v2Z"/></svg>開いています <b id="appsCount"></b></span>
+        <button type="button" class="mini" id="appsLockBtn">ロックする</button>
+      </div>
+      <form class="appadd" id="appForm" autocomplete="off">
+        <input type="text" id="appName" maxlength="80" enterkeyhint="next" aria-label="アプリの名称" placeholder="アプリの名称">
+        <div class="appadd2">
+          <input type="text" id="appUrl" maxlength="2000" inputmode="url" enterkeyhint="done" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="URL" placeholder="https://…">
+          <button type="submit" class="addgo" aria-label="足す">＋</button>
+        </div>
+      </form>
+      <div id="appList"></div>
+      <div class="appsfoot">
+        <button type="button" class="mini" id="appsBulk">まとめて足す</button>
+        <button type="button" class="mini" id="appsPass">パスワードを変える</button>
+      </div>
+      <div class="note appsnote">ほかのタブに移る・アプリを1分より長く閉じる・5分さわらない、のどれかでロックします。</div>
+    </div>
+
+    <div class="empty" id="apps-no" hidden>この開き方では暗号が使えないので、自作アプリの一覧は使えません。<br>公開しているページ（https://…）から開いてください。</div>
+  </section>
+
   <!-- ============ 設定 ============ -->
   <section id="view-set" class="view">
     <div id="setBody"></div>
@@ -149,9 +203,10 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=7dde5aa2"></script>
-<script src="js/store.js?v=7dde5aa2"></script>
-<script src="js/sync.js?v=7dde5aa2"></script>
-<script src="js/app.js?v=7dde5aa2"></script>
+<script src="js/config.js?v=f9a103ff"></script>
+<script src="js/store.js?v=f9a103ff"></script>
+<script src="js/sync.js?v=f9a103ff"></script>
+<script src="js/lock.js?v=f9a103ff"></script>
+<script src="js/app.js?v=f9a103ff"></script>
 </body>
 </html>

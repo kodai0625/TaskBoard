@@ -9,12 +9,17 @@
        tb.conn … { url, pin }
    ・同期の目印は側ごとに別のキーです（受け口の中でも側ごとに別のタブに入ります）
        tb.personal.meta／tb.work.meta … { since, lastSyncAt }
-   ・送信箱（outbox）に積んだものを、js/sync.js が「その側」の印を付けて送ります */
+   ・送信箱（outbox）に積んだものを、js/sync.js が「その側」の印を付けて送ります
+   ・★自作アプリの一覧（個人の側だけ・ロックつき。2026-10-11）は、memo の入れ物に同居しています。
+     受け口の GAS が task と memo しか受けないためです（貼り直しを増やさない）。
+     印は src:'app' と、id が app- で始まること。ここでは 'app' という種類として出し入れし、
+     メモの一覧（list(…,'memo')）には出しません。中身は暗号（js/lock.js）なので、ここでは読めません */
 (function (global) {
   'use strict';
 
   var SPACES = ['personal', 'work'];
   var KINDS = ['task', 'memo'];
+  var APP_SPACE = 'personal', APP_PREFIX = 'app-';
   var KEY_UI = 'tb.ui';
 
   var bags = {};      // { personal: {task:{}, memo:{}, outbox:[]}, work: {...} }
@@ -76,6 +81,13 @@
     return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   }
 
+  /* 自作アプリの一覧は memo の入れ物に同居している（上の説明）。'app' と言われたら memo の入れ物を見る */
+  function isApp(r) { return !!r && (r.src === 'app' || String(r.id || '').indexOf(APP_PREFIX) === 0); }
+  function bagOf(kind) { return kind === 'app' ? 'memo' : kind; }
+  function checkApp(space, kind) {
+    if (kind === 'app' && space !== APP_SPACE) throw new Error('自作アプリの一覧は個人の側だけです');
+  }
+
   function queue(space, kind, id) {
     var ob = bags[space].outbox;
     for (var i = 0; i < ob.length; i++) {
@@ -93,27 +105,29 @@
     ui: function () { return ui; },
     saveUi: function () { write(KEY_UI, ui); },
 
-    /** 一覧（消したものは除く） */
+    /** 一覧（消したものは除く）。'memo' には自作アプリの分を出さず、'app' にはその分だけを出す */
     list: function (space, kind) {
       check(space);
-      var m = bags[space][kind] || {};
+      var m = bags[space][bagOf(kind)] || {};
       return Object.keys(m).map(function (id) { return m[id]; })
-        .filter(function (r) { return !r.deleted; });
+        .filter(function (r) { return !r.deleted && isApp(r) === (kind === 'app'); });
     },
 
     get: function (space, kind, id) {
       check(space);
-      return (bags[space][kind] || {})[id] || null;
+      var rec = (bags[space][bagOf(kind)] || {})[id] || null;
+      return rec && isApp(rec) === (kind === 'app') ? rec : null;
     },
 
     /** 足す・直す。id がなければ新しく作る */
     put: function (space, kind, rec) {
-      check(space);
+      check(space); checkApp(space, kind);
       var now = Date.now();
-      if (!rec.id) { rec.id = newId(); rec.createdAt = now; }
+      if (kind === 'app') rec.src = 'app';
+      if (!rec.id) { rec.id = (kind === 'app' ? APP_PREFIX : '') + newId(); rec.createdAt = now; }
       rec.updatedAt = now;
-      bags[space][kind][rec.id] = rec;
-      queue(space, kind, rec.id);
+      bags[space][bagOf(kind)][rec.id] = rec;
+      queue(space, bagOf(kind), rec.id);
       save(space);
       Store.onWrite && Store.onWrite(space);
       return rec;
@@ -121,12 +135,14 @@
 
     /** 消す（記録は残して deleted の印を付ける。受け口に「消した」を伝えるため） */
     remove: function (space, kind, id) {
-      check(space);
-      var rec = bags[space][kind][id];
+      check(space); checkApp(space, kind);
+      var rec = Store.get(space, kind, id);
       if (!rec) return;
+      // 自作アプリの分は、消した印だけを残す（暗号の中身を、端末にも受け口にも残さない）
+      if (kind === 'app') rec = bags[space].memo[id] = { id: id, src: 'app', createdAt: rec.createdAt };
       rec.deleted = true;
       rec.updatedAt = Date.now();
-      queue(space, kind, id);
+      queue(space, bagOf(kind), id);
       save(space);
       Store.onWrite && Store.onWrite(space);
     },
