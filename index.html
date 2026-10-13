@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=c1c5fb28">
+<link rel="stylesheet" href="css/style.css?v=fd73f54b">
 </head>
 <body data-space="personal">
 
@@ -40,6 +40,8 @@
     <button type="button" class="tab on" data-view="task">タスク <span class="cnt" id="cntTask"></span></button>
     <button type="button" class="tab" data-view="plan">予定</button>
     <button type="button" class="tab" data-view="memo">メモ <span class="cnt" id="cntMemo"></span></button>
+    <!-- 会社の側にだけ出る -->
+    <button type="button" class="tab" data-view="buy" id="tabBuy" hidden>買い出し <span class="cnt" id="cntBuy"></span></button>
     <!-- 個人の側にだけ出る。中身はパスワードで暗号にして、この端末の中だけに持つ（js/lock.js） -->
     <button type="button" class="tab" data-view="apps" id="tabApps"><svg class="lk" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="M17 9V7A5 5 0 0 0 7 7v2H5v12h14V9h-2Zm-8 0V7a3 3 0 0 1 6 0v2H9Z"/></svg>自作アプリ</button>
   </nav>
@@ -138,6 +140,18 @@
     <div id="memoList"></div>
   </section>
 
+  <!-- ============ 買い出し（会社の側だけ） ============ -->
+  <section id="view-buy" class="view">
+    <form class="addbar buyadd" id="buyForm" autocomplete="off">
+      <input type="text" id="buyInput" maxlength="80" list="buyNames" enterkeyhint="done" aria-label="買うものを足す" placeholder="買うものを足す">
+      <input type="text" id="buyQty" maxlength="20" enterkeyhint="done" aria-label="数量（空でもよい）" placeholder="数量">
+      <button type="submit" class="addgo" aria-label="足す">＋</button>
+    </form>
+    <datalist id="buyNames"></datalist>
+    <div class="rule" id="buyRule"></div>
+    <div id="buyList"></div>
+  </section>
+
   <!-- ============ 自作アプリ（個人の側だけ・ロックつき） ============
        形は3つ。まだパスワードを決めていない／ロック中／開いている。js/app.js がどれか1つだけ出す -->
   <section id="view-apps" class="view">
@@ -212,11 +226,11 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=c1c5fb28"></script>
-<script src="js/store.js?v=c1c5fb28"></script>
-<script src="js/sync.js?v=c1c5fb28"></script>
-<script src="js/lock.js?v=c1c5fb28"></script>
-<script src="js/qr.js?v=c1c5fb28"></script>
-<script src="js/app.js?v=c1c5fb28"></script>
+<script src="js/config.js?v=fd73f54b"></script>
+<script src="js/store.js?v=fd73f54b"></script>
+<script src="js/sync.js?v=fd73f54b"></script>
+<script src="js/lock.js?v=fd73f54b"></script>
+<script src="js/qr.js?v=fd73f54b"></script>
+<script src="js/app.js?v=fd73f54b"></script>
 </body>
 </html>

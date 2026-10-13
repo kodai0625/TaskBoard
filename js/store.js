@@ -14,13 +14,18 @@
        tb.apps … この端末の中だけ。★送信箱に積まない・受け口から受け取らない・控えにも入れない
      中身は暗号（js/lock.js）なので、ここでは読めません。
      同じ日の最初の版だけ、memo の入れ物に入れて受け口へ送っていました（印は src:'app' と、app- で始まる id）。
-     その印の付いたものは、いまも「メモではない」として、一覧・受け取り・控えから外します */
+     その印の付いたものは、いまも「メモではない」として、一覧・受け取り・控えから外します
+   ・★買い出しリスト（2026-10-13）は、memo の入れ物に同居しています。受け口の GAS が task と memo しか
+     受けないためです（貼り直しを増やさない）。印は src:'buy' と、buy- で始まる id。
+     ここでは 'buy' という種類として出し入れし、メモの一覧（list(…,'memo')）には出しません。
+     こちらは自作アプリと違って、ふつうに同期します（送信箱に積む・受け取る・控えにも入る） */
 (function (global) {
   'use strict';
 
   var SPACES = ['personal', 'work'];
   var KINDS = ['task', 'memo'];
   var APP_SPACE = 'personal', APP_PREFIX = 'app-', KEY_APPS = 'tb.apps';
+  var BUY_PREFIX = 'buy-';
   var KEY_UI = 'tb.ui';
 
   var bags = {};      // { personal: {task:{}, memo:{}, outbox:[]}, work: {...} }
@@ -75,7 +80,7 @@
     SPACES.forEach(function (sp) { delete metas[sp].url; delete metas[sp].pin; });
     ui = read(KEY_UI, null) || {};
     if (SPACES.indexOf(ui.space) < 0) ui.space = 'personal';
-    if (['task', 'plan', 'memo'].indexOf(ui.view) < 0) ui.view = 'task';
+    if (['task', 'plan', 'memo', 'buy'].indexOf(ui.view) < 0) ui.view = 'task';
   }
 
   function save(space) { write(key(space), bags[space]); }
@@ -86,6 +91,10 @@
 
   /* 自作アプリの一覧の印（最初の版が memo の入れ物に入れたもの。いまは tb.apps に置く） */
   function isApp(r) { return !!r && (r.src === 'app' || String(r.id || '').indexOf(APP_PREFIX) === 0); }
+  /* 買い出しリストは memo の入れ物に同居している（上の説明）。'buy' と言われたら memo の入れ物を見る */
+  function isBuy(r) { return !!r && (r.src === 'buy' || String(r.id || '').indexOf(BUY_PREFIX) === 0); }
+  function bagOf(kind) { return kind === 'buy' ? 'memo' : kind; }
+
   function checkApp(space) {
     if (space !== APP_SPACE) throw new Error('自作アプリの一覧は個人の側だけです');
   }
@@ -138,19 +147,20 @@
     ui: function () { return ui; },
     saveUi: function () { write(KEY_UI, ui); },
 
-    /** 一覧（消したものは除く）。'app' は自作アプリの一覧（この端末の中だけ） */
+    /** 一覧（消したものは除く）。'app' は自作アプリの一覧（この端末の中だけ）。
+        'memo' には買い出しの分を出さず、'buy' にはその分だけを出す */
     list: function (space, kind) {
       check(space);
       if (kind === 'app') { checkApp(space); return Object.keys(apps).map(function (id) { return apps[id]; }); }
-      var m = bags[space][kind] || {};
+      var m = bags[space][bagOf(kind)] || {};
       return Object.keys(m).map(function (id) { return m[id]; })
-        .filter(function (r) { return !r.deleted && !isApp(r); });
+        .filter(function (r) { return !r.deleted && !isApp(r) && isBuy(r) === (kind === 'buy'); });
     },
 
     get: function (space, kind, id) {
       check(space);
       if (kind === 'app') { checkApp(space); return apps[id] || null; }
-      return (bags[space][kind] || {})[id] || null;
+      return (bags[space][bagOf(kind)] || {})[id] || null;
     },
 
     /** 足す・直す。id がなければ新しく作る */
@@ -158,10 +168,11 @@
       check(space);
       var now = Date.now();
       if (kind === 'app') { checkApp(space); Store.putApps([rec]); return rec; }
-      if (!rec.id) { rec.id = newId(); rec.createdAt = now; }
+      if (kind === 'buy') rec.src = 'buy';
+      if (!rec.id) { rec.id = (kind === 'buy' ? BUY_PREFIX : '') + newId(); rec.createdAt = now; }
       rec.updatedAt = now;
-      bags[space][kind][rec.id] = rec;
-      queue(space, kind, rec.id);
+      bags[space][bagOf(kind)][rec.id] = rec;
+      queue(space, bagOf(kind), rec.id);
       save(space);
       Store.onWrite && Store.onWrite(space);
       return rec;
@@ -191,11 +202,11 @@
         write(KEY_APPS, apps);
         return;
       }
-      var rec = bags[space][kind][id];
+      var rec = bags[space][bagOf(kind)][id];
       if (!rec) return;
       rec.deleted = true;
       rec.updatedAt = Date.now();
-      queue(space, kind, id);
+      queue(space, bagOf(kind), id);
       save(space);
       Store.onWrite && Store.onWrite(space);
     },

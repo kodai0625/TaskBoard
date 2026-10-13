@@ -248,6 +248,8 @@
     var memos = Store.list(space(), 'memo').length;
     document.getElementById('cntTask').textContent = open ? open : '';
     document.getElementById('cntMemo').textContent = memos ? memos : '';
+    var buy = Store.list(BUYSP, 'buy').filter(function (b) { return !b.done; }).length;
+    document.getElementById('cntBuy').textContent = buy ? buy : '';
   }
 
   /* ---------- 個人と会社の切り替え ---------- */
@@ -262,14 +264,16 @@
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', sp === 'work' ? '#4a3527' : '#2a2433');
     document.getElementById('tabApps').hidden = sp !== APPSP;     // 自作アプリは個人の側だけ
+    document.getElementById('tabBuy').hidden = sp !== BUYSP;      // 買い出しは会社の側だけ
     document.getElementById('taskInput').placeholder = label() + 'のタスクを足す';
     document.getElementById('memoInput').placeholder = label() + 'のメモを書く';
     var rule = sp === 'work'
       ? '会社のタスクには、金額・氏名・IDを書かない（例：「◯◯店の締めを確認」）'
       : '';
-    ['taskRule', 'memoRule'].forEach(function (id) {
+    ['taskRule', 'memoRule', 'buyRule'].forEach(function (id) {
       var el = document.getElementById(id);
-      el.textContent = rule; el.hidden = !rule;
+      el.textContent = rule && id === 'buyRule' ? '買い出しにも、金額・氏名・IDは書かない（数量は書いてよい）' : rule;
+      el.hidden = !rule;
     });
   }
 
@@ -278,7 +282,8 @@
     Store.ui().space = sp;
     Store.saveUi();
     applySpace();
-    if (view === 'apps') show(Store.ui().view); else renderAll();   // 自作アプリは個人の側だけ。出たらロックする
+    // 自作アプリは個人の側だけ（出たらロックする）。買い出しは会社の側だけ。どちらも、反対の側ではタスクへ移す
+    if (view === 'apps' || view === 'buy') show(Store.ui().view === 'buy' ? 'task' : Store.ui().view); else renderAll();
     toast(label() + 'に切り替えました');
   }
 
@@ -287,6 +292,7 @@
   var lastView = 'task';
   function show(v) {
     if (v === 'apps' && space() !== APPSP) v = 'task';
+    if (v === 'buy' && space() !== BUYSP) v = 'task';
     if (view === 'apps' && v !== 'apps') lockApps();
     if (view !== 'set') lastView = view;
     view = v;
@@ -308,6 +314,7 @@
     if (view === 'task') renderTasks();
     if (view === 'plan') renderPlan();
     if (view === 'memo') renderMemos();
+    if (view === 'buy') renderBuy();
     if (view === 'apps') renderApps();
     if (view === 'set') renderSettings();
   }
@@ -980,6 +987,146 @@
         };
       }
     );
+  }
+
+  /* ================= 買い出し（会社の側だけ。2026-10-13 ko-dai さんの願い） =================
+     店で買うもののリスト。丸を押すと「買った」。買ったものは下にたたんで残し、丸を外すと「また買う」に戻る
+     （よく買うものを、打ち直さなくて済むように）。
+       ・受け口の GAS は task と memo しか受けないので、memo として送る（貼り直し不要）。
+         印は src:'buy'・id が buy- で始まること。Store が 'buy' という種類として出し入れし、メモの一覧には出さない（js/store.js）
+       ・中身：text（買うもの。受け口のシートの見出しにもなる）／qty（数量。空でもよい）／note（メモ）
+               done・doneAt（買った）／need（リストに入れた時刻。並びに使う）
+       ・Obsidian へは書き出さない（書き出す.py が飛ばす）。買ったら用のなくなるものなので
+       ・Diem（2人のカレンダー）は task しか読まないので、そちらには出ない */
+  var BUYSP = 'work';
+  var showBought = false;
+
+  function buyKey(s) { return String(s || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase(); }
+
+  function buyRow(b) {
+    return '<div class="trow buy' + (b.done ? ' done' : '') + '" data-id="' + U.esc(b.id) + '">'
+      + '<button type="button" class="ck" data-act="btoggle" aria-label="' + (b.done ? 'また買うものにもどす' : '買った') + '">'
+      + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      + '</button>'
+      + '<button type="button" class="tbody" data-act="bedit">'
+      + '<span class="ttl">' + U.esc(b.text) + '</span>'
+      + (b.qty ? '<span class="qty">' + U.esc(b.qty) + '</span>' : '')
+      + (b.note ? '<span class="hasnote">メモあり</span>' : '')
+      + '</button></div>';
+  }
+
+  function renderBuy() {
+    var all = Store.list(BUYSP, 'buy');
+    var open = all.filter(function (b) { return !b.done; })
+      .sort(function (a, b) { return (a.need || a.createdAt || 0) - (b.need || b.createdAt || 0); });
+    var done = all.filter(function (b) { return b.done; })
+      .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
+    var h = open.length
+      ? '<div class="card list">' + open.map(buyRow).join('') + '</div>'
+      : '<div class="empty art">' + STAR
+        + (done.length ? '<b>買うものは全部そろいました</b>また要るものは、下の丸を外すと戻ります' : '<b>買うものはありません</b>上に書いて足してください') + '</div>';
+    if (done.length) {
+      h += '<button type="button" class="donehead" data-act="showbought">' + (showBought ? '▾' : '▸') + ' 買ったもの ' + done.length + '件</button>';
+      if (showBought) {
+        h += '<div class="card list">' + done.map(buyRow).join('') + '</div>'
+          + '<div class="buyfoot"><button type="button" class="mini danger" data-act="clearbought">買ったものを全部消す</button></div>';
+      }
+    }
+    document.getElementById('buyList').innerHTML = h;
+    // 前に買ったものは、打ちはじめると候補に出る（選んで足すと、同じ1件がリストに戻る）
+    document.getElementById('buyNames').innerHTML = done.map(function (b) { return '<option value="' + U.esc(b.text) + '">'; }).join('');
+  }
+
+  function addBuy() {
+    var n = document.getElementById('buyInput'), q = document.getElementById('buyQty');
+    var text = n.value.trim(), qty = q.value.trim(), now = Date.now();
+    if (!text) { n.focus(); return; }
+    if (!confirmWork(text + ' ' + qty, BUYSP)) return;
+    var same = Store.list(BUYSP, 'buy').filter(function (b) { return buyKey(b.text) === buyKey(text); })[0];
+    if (same && !same.done) {
+      // もうリストにある：増やさない。数量を書いていれば、それに直す
+      if (qty && qty !== (same.qty || '')) { same.qty = qty; Store.put(BUYSP, 'buy', same); toast('もうリストにあります（数量を直しました）'); }
+      else toast('もうリストにあります');
+    } else if (same) {
+      // 前に買ったもの：同じ1件をリストに戻す
+      same.done = false; same.doneAt = 0; same.need = now; same.qty = qty;
+      Store.put(BUYSP, 'buy', same);
+    } else {
+      Store.put(BUYSP, 'buy', { text: text, qty: qty, note: '', done: false, need: now });
+    }
+    n.value = ''; q.value = '';
+    renderAll();
+    n.focus();
+  }
+
+  function toggleBuy(id) {
+    var b = Store.get(BUYSP, 'buy', id);
+    if (!b) return;
+    b.done = !b.done;
+    b.doneAt = b.done ? Date.now() : 0;
+    if (!b.done) b.need = Date.now();             // また買うものは、リストの一番下に入る
+    Store.put(BUYSP, 'buy', b);
+    renderAll();
+    if (b.done) {
+      toast('買いました', function () {
+        var cur = Store.get(BUYSP, 'buy', id);
+        if (!cur) return;
+        cur.done = false; cur.doneAt = 0;
+        Store.put(BUYSP, 'buy', cur);
+        renderAll();
+      });
+    }
+  }
+
+  function editBuy(id) {
+    var b = Store.get(BUYSP, 'buy', id);
+    if (!b) return;
+    modal('<h2>買い出し</h2>'
+      + '<div class="f"><label for="y-text">買うもの</label><input type="text" id="y-text" maxlength="80" value="' + U.esc(b.text) + '"></div>'
+      + '<div class="f"><label for="y-qty">数量（空でもよい）</label><input type="text" id="y-qty" maxlength="20" value="' + U.esc(b.qty || '') + '"></div>'
+      + '<div class="f"><label for="y-note">メモ（売り場・銘柄など。空でもよい）</label><textarea id="y-note" rows="3" maxlength="1000">' + U.esc(b.note || '') + '</textarea></div>'
+      + '<div class="acts"><button type="button" class="del" id="y-del">消す</button>'
+      + '<button type="button" id="y-cancel">やめる</button><button type="button" class="go" id="y-ok">直す</button></div>',
+      function (m) {
+        m.querySelector('#y-cancel').onclick = closeModal;
+        m.querySelector('#y-del').onclick = function () {
+          Store.remove(BUYSP, 'buy', id);
+          closeModal(); renderAll();
+          toast('消しました', function () {
+            var cur = Store.get(BUYSP, 'buy', id);
+            if (!cur) return;
+            delete cur.deleted;
+            Store.put(BUYSP, 'buy', cur);
+            renderAll();
+          });
+        };
+        m.querySelector('#y-ok').onclick = function () {
+          var text = m.querySelector('#y-text').value.trim(), qty = m.querySelector('#y-qty').value.trim(), note = m.querySelector('#y-note').value.trim();
+          if (!text) { toast('買うものが空です'); return; }
+          if (!confirmWork(text + ' ' + qty + ' ' + note, BUYSP)) return;
+          b.text = text; b.qty = qty; b.note = note;
+          Store.put(BUYSP, 'buy', b);
+          closeModal(); renderAll();
+        };
+      });
+  }
+
+  function clearBought() {
+    var done = Store.list(BUYSP, 'buy').filter(function (b) { return b.done; });
+    if (!done.length) return;
+    if (!global.confirm('買ったもの ' + done.length + '件を、リストから消します。\n（候補にも出なくなります）\n\nよろしいですか？')) return;
+    var ids = done.map(function (b) { return b.id; });
+    ids.forEach(function (id) { Store.remove(BUYSP, 'buy', id); });
+    renderAll();
+    toast(ids.length + '件消しました', function () {
+      ids.forEach(function (id) {
+        var cur = Store.get(BUYSP, 'buy', id);
+        if (!cur) return;
+        delete cur.deleted;
+        Store.put(BUYSP, 'buy', cur);
+      });
+      renderAll();
+    });
   }
 
   /* ================= 自作アプリ（個人の側だけ・ロックつき。2026-10-11 ko-dai さんの願い） =================
@@ -1673,6 +1820,7 @@
       h += '<div class="setrow"><div><div class="k">' + U.esc(label(sp)) + '</div>'
         + '<div class="d">タスク ' + open + '件（済み ' + (tasks.length - open) + '件）・メモ ' + Store.list(sp, 'memo').length + '件'
         + (devN ? '・部署の残りの写し ' + devN + '件' : '')
+        + (sp === BUYSP && Store.list(sp, 'buy').length ? '・買い出し ' + Store.list(sp, 'buy').filter(function (b) { return !b.done; }).length + '件' : '')
         + '・' + (ss.kind === 'off' ? '端末の中だけ' : ss.kind === 'error' ? '送れていません' : ss.pending ? '未送信 ' + ss.pending + '件' : '同期ずみ')
         + '</div></div></div>';
     });
@@ -1971,6 +2119,24 @@
     document.getElementById('memoList').addEventListener('click', function (e) {
       var c = e.target.closest('.memo');
       if (c) editMemo(c.dataset.id);
+    });
+
+    /* 買い出し */
+    document.getElementById('buyForm').addEventListener('submit', function (e) { e.preventDefault(); addBuy(); });
+    document.getElementById('buyList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act]');
+      if (!b) return;
+      if (b.dataset.act === 'showbought') { showBought = !showBought; renderBuy(); return; }
+      if (b.dataset.act === 'clearbought') { clearBought(); return; }
+      var row = b.closest('.trow');
+      if (!row) return;
+      if (b.dataset.act === 'bedit') { editBuy(row.dataset.id); return; }
+      if (b.dataset.act === 'btoggle' && !b.classList.contains('pop')) {
+        // 買ったときだけ、金の丸と光を見せてから入れ替える（戻すときはすぐ）
+        var cur = Store.get(BUYSP, 'buy', row.dataset.id);
+        if (cur && !cur.done) { b.classList.add('pop'); setTimeout(function () { toggleBuy(row.dataset.id); }, 380); }
+        else toggleBuy(row.dataset.id);
+      }
     });
 
     /* 自作アプリ */
