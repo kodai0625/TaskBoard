@@ -918,6 +918,13 @@
   }
 
   /* ================= メモ ================= */
+  /** 書いた分だけ欄を伸ばす（長いメモが欄の中で隠れないように）。伸ばすのは画面の高さの6割まで。空なら元の高さに戻す */
+  function grow(el) {
+    el.style.height = '';
+    if (!el.value) return;
+    el.style.height = Math.min(el.scrollHeight + 2, Math.round(global.innerHeight * 0.6)) + 'px';
+  }
+
   function renderMemos() {
     var list = Store.list(space(), 'memo')
       .sort(function (a, b) { return b.updatedAt - a.updatedAt; });
@@ -955,6 +962,9 @@
       + '<button type="button" class="go" id="m-ok">直す</button>'
       + '</div>',
       function (m) {
+        var box = m.querySelector('#m-text');
+        grow(box);
+        box.addEventListener('input', function () { grow(box); });
         m.querySelector('#m-del').onclick = function () {
           Store.remove(sp, 'memo', id);
           closeModal(); renderAll();
@@ -2108,12 +2118,13 @@
     var memoInput = document.getElementById('memoInput');
     document.getElementById('memoForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      if (addMemo(memoInput.value)) memoInput.value = '';
+      if (addMemo(memoInput.value)) { memoInput.value = ''; grow(memoInput); }
     });
+    memoInput.addEventListener('input', function () { grow(memoInput); });
     memoInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        if (addMemo(memoInput.value)) memoInput.value = '';
+        if (addMemo(memoInput.value)) { memoInput.value = ''; grow(memoInput); }
       }
     });
     document.getElementById('memoList').addEventListener('click', function (e) {

@@ -192,8 +192,8 @@ main{max-width:640px; margin:0 auto}
 
 /* メモ */
 .memo{display:block; width:100%; text-align:left; color:var(--ink)}
-.mtext{display:block; white-space:pre-wrap; word-break:break-word; font-size:14.5px; line-height:1.6;
-  display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden}
+/* 長いメモも、途中で切らずに全部出す（2026-10-13 ko-dai さん。前は6行で切っていた） */
+.mtext{display:block; white-space:pre-wrap; word-break:break-word; font-size:14.5px; line-height:1.6}
 .mtime{display:block; font-size:11px; color:var(--dim); margin-top:6px; text-align:right}
 
 /* ---------- 部品 ---------- */
