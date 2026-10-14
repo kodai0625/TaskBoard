@@ -513,3 +513,6 @@ a.alink .aname::after{content:" ↗"; color:var(--gold); font-weight:400; font-s
 .trow.buy .ttl{flex:0 1 auto}
 .trow.buy.done .qty{border-color:var(--line); color:var(--dim); font-weight:400}
 .buyfoot{display:flex; justify-content:flex-end; margin:4px 2px 0}
+
+/* メモ欄は書いた分だけ伸びる（js/app.js の grow）。欄の中では動かさず、ページのほうを動かす（2026-10-14） */
+#memoInput,#m-text,#e-note,#y-note{resize:none; overflow:hidden}

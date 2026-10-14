@@ -642,6 +642,7 @@
         m.querySelectorAll('[data-due]').forEach(function (b) {
           b.onclick = function () { due.value = b.dataset.due; };
         });
+        autoGrow(m.querySelector('#e-note'));
         var doIn = m.querySelector('#e-do');
         m.querySelectorAll('[data-do]').forEach(function (b) {
           b.onclick = function () { doIn.value = b.dataset.do; };
@@ -918,11 +919,20 @@
   }
 
   /* ================= メモ ================= */
-  /** 書いた分だけ欄を伸ばす（長いメモが欄の中で隠れないように）。伸ばすのは画面の高さの6割まで。空なら元の高さに戻す */
+  /** 書いた分だけ欄を伸ばす。★欄の中では動かさず、全文を出して、ページ（別窓）のほうを動かす（2026-10-14 ko-dai さん）。
+      空なら元の高さに戻す。測り直す一瞬だけ欄が縮むので、動かしていた位置を覚えておいて戻す（打つたびに跳ねないように） */
   function grow(el) {
+    var sc = el.closest('.modal') || document.scrollingElement || document.documentElement;
+    var top = sc.scrollTop;
     el.style.height = '';
-    if (!el.value) return;
-    el.style.height = Math.min(el.scrollHeight + 2, Math.round(global.innerHeight * 0.6)) + 'px';
+    if (el.value) el.style.height = (el.scrollHeight + 2) + 'px';
+    sc.scrollTop = top;
+  }
+  /** 開いたときに伸ばし、打つたびに伸ばし直す */
+  function autoGrow(el) {
+    if (!el) return;
+    grow(el);
+    el.addEventListener('input', function () { grow(el); });
   }
 
   function renderMemos() {
@@ -962,9 +972,7 @@
       + '<button type="button" class="go" id="m-ok">直す</button>'
       + '</div>',
       function (m) {
-        var box = m.querySelector('#m-text');
-        grow(box);
-        box.addEventListener('input', function () { grow(box); });
+        autoGrow(m.querySelector('#m-text'));
         m.querySelector('#m-del').onclick = function () {
           Store.remove(sp, 'memo', id);
           closeModal(); renderAll();
@@ -1098,6 +1106,7 @@
       + '<div class="acts"><button type="button" class="del" id="y-del">消す</button>'
       + '<button type="button" id="y-cancel">やめる</button><button type="button" class="go" id="y-ok">直す</button></div>',
       function (m) {
+        autoGrow(m.querySelector('#y-note'));
         m.querySelector('#y-cancel').onclick = closeModal;
         m.querySelector('#y-del').onclick = function () {
           Store.remove(BUYSP, 'buy', id);
