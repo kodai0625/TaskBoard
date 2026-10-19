@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=50813516">
+<link rel="stylesheet" href="css/style.css?v=1bb35ca8">
 </head>
 <body data-space="personal">
 
@@ -142,12 +142,27 @@
 
   <!-- ============ 買い出し（会社の側だけ） ============ -->
   <section id="view-buy" class="view">
-    <form class="addbar buyadd" id="buyForm" autocomplete="off">
-      <input type="text" id="buyInput" maxlength="80" list="buyNames" enterkeyhint="done" aria-label="買うものを足す" placeholder="買うものを足す">
-      <input type="text" id="buyQty" maxlength="20" enterkeyhint="done" aria-label="数量（空でもよい）" placeholder="数量">
-      <button type="submit" class="addgo" aria-label="足す">＋</button>
+    <form class="card buyform" id="buyForm" autocomplete="off">
+      <div class="bf-row">
+        <label class="bf-lbl" for="buyInput">買うもの</label>
+        <input type="text" id="buyInput" maxlength="80" list="buyNames" enterkeyhint="next" placeholder="例：キッチンペーパー">
+      </div>
+      <div class="bf-row">
+        <span class="bf-lbl">個数</span>
+        <div class="stepper">
+          <button type="button" data-step="-1" aria-label="1つ減らす">−</button>
+          <input type="number" id="buyCount" inputmode="numeric" min="1" max="999" value="1" aria-label="個数">
+          <button type="button" data-step="1" aria-label="1つ増やす">＋</button>
+        </div>
+      </div>
+      <div class="bf-row">
+        <label class="bf-lbl" for="buyPlace">買う場所</label>
+        <input type="text" id="buyPlace" maxlength="40" list="buyPlaces" enterkeyhint="done" placeholder="例：業務スーパー（空でもよい）">
+      </div>
+      <button type="submit" class="mini go bf-go">リストに足す</button>
     </form>
     <datalist id="buyNames"></datalist>
+    <datalist id="buyPlaces"></datalist>
     <div class="rule" id="buyRule"></div>
     <div id="buyList"></div>
   </section>
@@ -226,11 +241,11 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=50813516"></script>
-<script src="js/store.js?v=50813516"></script>
-<script src="js/sync.js?v=50813516"></script>
-<script src="js/lock.js?v=50813516"></script>
-<script src="js/qr.js?v=50813516"></script>
-<script src="js/app.js?v=50813516"></script>
+<script src="js/config.js?v=1bb35ca8"></script>
+<script src="js/store.js?v=1bb35ca8"></script>
+<script src="js/sync.js?v=1bb35ca8"></script>
+<script src="js/lock.js?v=1bb35ca8"></script>
+<script src="js/qr.js?v=1bb35ca8"></script>
+<script src="js/app.js?v=1bb35ca8"></script>
 </body>
 </html>

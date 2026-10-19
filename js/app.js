@@ -272,7 +272,7 @@
       : '';
     ['taskRule', 'memoRule', 'buyRule'].forEach(function (id) {
       var el = document.getElementById(id);
-      el.textContent = rule && id === 'buyRule' ? '買い出しにも、金額・氏名・IDは書かない（数量は書いてよい）' : rule;
+      el.textContent = rule && id === 'buyRule' ? '買い出しにも、金額・氏名・IDは書かない（個数は書いてよい）' : rule;
       el.hidden = !rule;
     });
   }
@@ -1012,8 +1012,10 @@
      （よく買うものを、打ち直さなくて済むように）。
        ・受け口の GAS は task と memo しか受けないので、memo として送る（貼り直し不要）。
          印は src:'buy'・id が buy- で始まること。Store が 'buy' という種類として出し入れし、メモの一覧には出さない（js/store.js）
-       ・中身：text（買うもの。受け口のシートの見出しにもなる）／qty（数量。空でもよい）／note（メモ）
-               done・doneAt（買った）／need（リストに入れた時刻。並びに使う）
+       ・中身：text（買うもの。受け口のシートの見出しにもなる）／count（個数。1〜999）／place（買う場所。空でもよい）
+               note（メモ）／done・doneAt（買った）／need（リストに入れた時刻。並びに使う）
+               （2026-10-13 の最初の形は qty＝数量を文字で持っていた。読めるように残してあり、直すと count に切りかわる）
+       ・一覧は買う場所ごとにまとめる。チェックボックスは四角（2026-10-19 ko-dai さん）
        ・Obsidian へは書き出さない（書き出す.py が飛ばす）。買ったら用のなくなるものなので
        ・Diem（2人のカレンダー）は task しか読まないので、そちらには出ない */
   var BUYSP = 'work';
@@ -1021,15 +1023,25 @@
 
   function buyKey(s) { return String(s || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase(); }
 
-  function buyRow(b) {
+  /** 個数は1〜999の整数にそろえる（全角の数字でもよい） */
+  function buyCount(v) {
+    var n = parseInt(String(v == null ? '' : v).normalize('NFKC'), 10);
+    return isNaN(n) || n < 1 ? 1 : Math.min(n, 999);
+  }
+  /** 個数の見せ方。前の形（数量を文字で持っていた分）は、そのまま出す */
+  function buyQtyLabel(b) { return b.count ? b.count + '個' : (b.qty || ''); }
+
+  function buyRow(b, withPlace) {
+    var q = buyQtyLabel(b);
     return '<div class="trow buy' + (b.done ? ' done' : '') + '" data-id="' + U.esc(b.id) + '">'
       + '<button type="button" class="ck" data-act="btoggle" aria-label="' + (b.done ? 'また買うものにもどす' : '買った') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       + '</button>'
       + '<button type="button" class="tbody" data-act="bedit">'
       + '<span class="ttl">' + U.esc(b.text) + '</span>'
-      + (b.qty ? '<span class="qty">' + U.esc(b.qty) + '</span>' : '')
+      + (withPlace && b.place ? '<span class="place">' + U.esc(b.place) + '</span>' : '')
       + (b.note ? '<span class="hasnote">メモあり</span>' : '')
+      + (q ? '<span class="qty">' + U.esc(q) + '</span>' : '')
       + '</button></div>';
   }
 
@@ -1039,42 +1051,68 @@
       .sort(function (a, b) { return (a.need || a.createdAt || 0) - (b.need || b.createdAt || 0); });
     var done = all.filter(function (b) { return b.done; })
       .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
+    // 買う場所ごとにまとめる（店に着いたら、その店の分だけ見ればよいように）。並びは、先に入れたものがある店から。
+    // 場所の無いものは最後に。全部に場所が無ければ、見出しは出さない
+    var groups = [], by = Object.create(null);
+    open.forEach(function (b) {
+      var k = (b.place || '').trim();
+      if (!by[k]) { by[k] = { place: k, items: [] }; groups.push(by[k]); }
+      by[k].items.push(b);
+    });
+    groups.sort(function (a, b) { return (a.place ? 0 : 1) - (b.place ? 0 : 1); });
+    var heads = groups.some(function (g) { return g.place; });
     var h = open.length
-      ? '<div class="card list">' + open.map(buyRow).join('') + '</div>'
+      ? groups.map(function (g) {
+          return (heads ? '<div class="agroup">' + U.esc(g.place || '場所なし') + '<span>' + g.items.length + '件</span></div>' : '')
+            + '<div class="card list">' + g.items.map(function (b) { return buyRow(b, false); }).join('') + '</div>';
+        }).join('')
       : '<div class="empty art">' + STAR
-        + (done.length ? '<b>買うものは全部そろいました</b>また要るものは、下の丸を外すと戻ります' : '<b>買うものはありません</b>上に書いて足してください') + '</div>';
+        + (done.length ? '<b>買うものは全部そろいました</b>また要るものは、下のチェックを外すと戻ります' : '<b>買うものはありません</b>上の欄に書いて足してください') + '</div>';
     if (done.length) {
       h += '<button type="button" class="donehead" data-act="showbought">' + (showBought ? '▾' : '▸') + ' 買ったもの ' + done.length + '件</button>';
       if (showBought) {
-        h += '<div class="card list">' + done.map(buyRow).join('') + '</div>'
+        h += '<div class="card list">' + done.map(function (b) { return buyRow(b, true); }).join('') + '</div>'
           + '<div class="buyfoot"><button type="button" class="mini danger" data-act="clearbought">買ったものを全部消す</button></div>';
       }
     }
     document.getElementById('buyList').innerHTML = h;
-    // 前に買ったものは、打ちはじめると候補に出る（選んで足すと、同じ1件がリストに戻る）
+    // 前に買ったものの名前と、使った買う場所は、打ちはじめると候補に出る
     document.getElementById('buyNames').innerHTML = done.map(function (b) { return '<option value="' + U.esc(b.text) + '">'; }).join('');
+    var places = [];
+    all.forEach(function (b) { var p = (b.place || '').trim(); if (p && places.indexOf(p) < 0) places.push(p); });
+    document.getElementById('buyPlaces').innerHTML = places.map(function (p) { return '<option value="' + U.esc(p) + '">'; }).join('');
   }
 
   function addBuy() {
-    var n = document.getElementById('buyInput'), q = document.getElementById('buyQty');
-    var text = n.value.trim(), qty = q.value.trim(), now = Date.now();
+    var n = document.getElementById('buyInput'), c = document.getElementById('buyCount'), p = document.getElementById('buyPlace');
+    var text = n.value.trim(), count = buyCount(c.value), place = p.value.trim(), now = Date.now();
     if (!text) { n.focus(); return; }
-    if (!confirmWork(text + ' ' + qty, BUYSP)) return;
-    var same = Store.list(BUYSP, 'buy').filter(function (b) { return buyKey(b.text) === buyKey(text); })[0];
-    if (same && !same.done) {
-      // もうリストにある：増やさない。数量を書いていれば、それに直す
-      if (qty && qty !== (same.qty || '')) { same.qty = qty; Store.put(BUYSP, 'buy', same); toast('もうリストにあります（数量を直しました）'); }
+    if (!confirmWork(text + ' ' + place, BUYSP)) return;
+    var all = Store.list(BUYSP, 'buy');
+    var sameName = function (b) { return buyKey(b.text) === buyKey(text); };
+    // まだ買っていないもので、名前も場所も同じもの：増やさない。個数がちがえば直す
+    var open = all.filter(function (b) { return !b.done && sameName(b) && buyKey(b.place) === buyKey(place); })[0];
+    // 前に買ったもの（同じ場所を先に探す）：同じ1件をリストに戻す
+    var done = all.filter(function (b) { return b.done && sameName(b) && buyKey(b.place) === buyKey(place); })[0]
+      || all.filter(function (b) { return b.done && sameName(b); })[0];
+    if (open) {
+      if (open.count !== count) { open.count = count; delete open.qty; Store.put(BUYSP, 'buy', open); toast('もうリストにあります（個数を' + count + '個に直しました）'); }
       else toast('もうリストにあります');
-    } else if (same) {
-      // 前に買ったもの：同じ1件をリストに戻す
-      same.done = false; same.doneAt = 0; same.need = now; same.qty = qty;
-      Store.put(BUYSP, 'buy', same);
+    } else if (done) {
+      done.done = false; done.doneAt = 0; done.need = now; done.count = count; done.place = place; delete done.qty;
+      Store.put(BUYSP, 'buy', done);
     } else {
-      Store.put(BUYSP, 'buy', { text: text, qty: qty, note: '', done: false, need: now });
+      Store.put(BUYSP, 'buy', { text: text, count: count, place: place, note: '', done: false, need: now });
     }
-    n.value = ''; q.value = '';
+    n.value = ''; c.value = 1;                 // 買う場所は残す（同じ店の分を続けて足せるように）
     renderAll();
     n.focus();
+  }
+
+  /** −／＋ のボタンで、となりの個数の欄を1つずつ動かす */
+  function stepCount(btn) {
+    var box = btn.closest('.stepper'), input = box && box.querySelector('input');
+    if (input) input.value = buyCount(buyCount(input.value) + Number(btn.dataset.step));
   }
 
   function toggleBuy(id) {
@@ -1099,14 +1137,22 @@
   function editBuy(id) {
     var b = Store.get(BUYSP, 'buy', id);
     if (!b) return;
+    // 前の形（数量を文字で持っていた分）は、文字のままメモの頭に残してから、個数に切りかえる
+    var legacy = !b.count && b.qty && !/^\s*\d+\s*$/.test(b.qty) ? b.qty : '';
     modal('<h2>買い出し</h2>'
       + '<div class="f"><label for="y-text">買うもの</label><input type="text" id="y-text" maxlength="80" value="' + U.esc(b.text) + '"></div>'
-      + '<div class="f"><label for="y-qty">数量（空でもよい）</label><input type="text" id="y-qty" maxlength="20" value="' + U.esc(b.qty || '') + '"></div>'
-      + '<div class="f"><label for="y-note">メモ（売り場・銘柄など。空でもよい）</label><textarea id="y-note" rows="3" maxlength="1000">' + U.esc(b.note || '') + '</textarea></div>'
+      + '<div class="f"><label>個数</label><div class="stepper">'
+      + '<button type="button" data-step="-1" aria-label="1つ減らす">−</button>'
+      + '<input type="number" id="y-count" inputmode="numeric" min="1" max="999" value="' + buyCount(b.count || b.qty) + '" aria-label="個数">'
+      + '<button type="button" data-step="1" aria-label="1つ増やす">＋</button></div></div>'
+      + '<div class="f"><label for="y-place">買う場所（空でもよい）</label><input type="text" id="y-place" maxlength="40" list="buyPlaces" value="' + U.esc(b.place || '') + '"></div>'
+      + '<div class="f"><label for="y-note">メモ（売り場・銘柄など。空でもよい）</label><textarea id="y-note" rows="3" maxlength="1000">'
+      + U.esc((legacy ? legacy + '\n' : '') + (b.note || '')) + '</textarea></div>'
       + '<div class="acts"><button type="button" class="del" id="y-del">消す</button>'
       + '<button type="button" id="y-cancel">やめる</button><button type="button" class="go" id="y-ok">直す</button></div>',
       function (m) {
         autoGrow(m.querySelector('#y-note'));
+        m.querySelectorAll('[data-step]').forEach(function (btn) { btn.onclick = function () { stepCount(btn); }; });
         m.querySelector('#y-cancel').onclick = closeModal;
         m.querySelector('#y-del').onclick = function () {
           Store.remove(BUYSP, 'buy', id);
@@ -1120,10 +1166,11 @@
           });
         };
         m.querySelector('#y-ok').onclick = function () {
-          var text = m.querySelector('#y-text').value.trim(), qty = m.querySelector('#y-qty').value.trim(), note = m.querySelector('#y-note').value.trim();
+          var text = m.querySelector('#y-text').value.trim(), place = m.querySelector('#y-place').value.trim(), note = m.querySelector('#y-note').value.trim();
           if (!text) { toast('買うものが空です'); return; }
-          if (!confirmWork(text + ' ' + qty + ' ' + note, BUYSP)) return;
-          b.text = text; b.qty = qty; b.note = note;
+          if (!confirmWork(text + ' ' + place + ' ' + note, BUYSP)) return;
+          b.text = text; b.count = buyCount(m.querySelector('#y-count').value); b.place = place; b.note = note;
+          delete b.qty;
           Store.put(BUYSP, 'buy', b);
           closeModal(); renderAll();
         };
@@ -2143,6 +2190,12 @@
 
     /* 買い出し */
     document.getElementById('buyForm').addEventListener('submit', function (e) { e.preventDefault(); addBuy(); });
+    document.getElementById('buyForm').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-step]');
+      if (b) stepCount(b);
+    });
+    // 個数の欄を空にしたまま離れたら、1に戻す
+    document.getElementById('buyCount').addEventListener('blur', function (e) { e.target.value = buyCount(e.target.value); });
     document.getElementById('buyList').addEventListener('click', function (e) {
       var b = e.target.closest('[data-act]');
       if (!b) return;
