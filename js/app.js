@@ -1108,15 +1108,15 @@
     } });
   }
 
+  var MOVE_DEF = 30;                 // 店の移動（分）
+
   /** その日の仕事を入れる・直す（会社の側の記録として同期する）。店を移動して働く日は、店を足していく（3つまで）。
       決めたら、その日を組む */
   function editWork(iso) {
     var w = workOf(iso), places = workplaces();
     var d = U.parse(iso);
-    // 店の移動の時間：前に移動した日の値を使う（無ければ30分）
-    var lastMove = 30;
-    for (var i = 1; i <= 60; i++) { var pw = workOf(shiftIso(iso, -i)); if (pw && segsOf(pw).length > 1 && pw.move != null) { lastMove = pw.move; break; } }
-    var st = { off: !!(w && w.off), move: w && w.move != null ? w.move : lastMove, segs: segsOf(w).map(function (x) { return { place: x.place, shift: x.shift, start: x.start, end: x.end }; }) };
+    // 店の移動は30分で組む（2026-10-23 ko-dai さん）。その日だけ変えたいときは、欄で変えられる
+    var st = { off: !!(w && w.off), move: w && w.move != null ? w.move : MOVE_DEF, segs: segsOf(w).map(function (x) { return { place: x.place, shift: x.shift, start: x.start, end: x.end }; }) };
     if (!st.segs.length) st.segs.push(newSeg(null));
 
     /** 新しい店の行。前の店があれば、ちがう店・前の店より後に始まる時間帯を選び、前の店の退勤を「出勤−移動」に寄せる */
@@ -1158,6 +1158,19 @@
           var mv = body.querySelector('#wk-move');
           if (mv) st.move = Math.max(0, Math.min(240, Number(String(mv.value).normalize('NFKC')) || 0));
         }
+        function segHint(g) {
+          var p = placeOf(g.place);
+          return (p ? '通勤は片道 ' + (p.commute || 0) + '分。' : '') + (g.start && g.end && toMin(g.end) <= toMin(g.start) ? '退勤は次の日の ' + g.end + ' です。' : '');
+        }
+        /** 欄はそのままにして、知らせの文だけを直す */
+        function refresh() {
+          body.querySelectorAll('[data-seg]').forEach(function (box) {
+            var g = st.segs[+box.dataset.seg];
+            if (g) box.querySelector('.wkhint').textContent = segHint(g);
+          });
+          var warn = body.querySelector('#wk-warn');
+          if (warn) { var bad = check(); warn.textContent = bad; warn.hidden = !bad; }
+        }
         function paint() {
           if (st.off) { body.innerHTML = ''; return; }
           var h = '';
@@ -1174,13 +1187,13 @@
                 }).join('') + '</div>' : '')
               + '<div class="f2 wktimes"><label>出勤<input type="time" class="wk-s" step="300" value="' + g.start + '"></label>'
               + '<label>退勤<input type="time" class="wk-e" step="300" value="' + g.end + '"></label></div>'
-              + '<div class="hint wkhint">' + U.esc((p ? '通勤は片道 ' + (p.commute || 0) + '分。' : '') + (toMin(g.end) <= toMin(g.start) ? '退勤は次の日の ' + g.end + ' です。' : '')) + '</div>'
+              + '<div class="hint wkhint">' + U.esc(segHint(g)) + '</div>'
               + '</div>';
           });
           if (st.segs.length < 3 && places.length > 1) h += '<button type="button" class="mini wkadd" id="wk-add">＋ 店を移動して、もう1つ働く</button>';
-          var bad = check();
-          if (bad) h += '<div class="warnbox">' + U.esc(bad) + '</div>';
+          h += '<div class="warnbox" id="wk-warn" hidden></div>';
           body.innerHTML = h;
+          refresh();
         }
         /** 時間の並びを確かめる（前の店の退勤より後に、次の店へ出勤する） */
         function check() {
@@ -1223,7 +1236,9 @@
           }
           paint();
         });
-        body.addEventListener('change', function () { read(); paint(); });
+        // ★時刻の欄を変えたときは描き直さない。描き直すと欄が作り直され、iPhone の時刻の輪が回している途中で閉じて、
+        //   そこで時刻が決まってしまう（2026-10-23 ko-dai さん「確定を押さなくても途中で勝手に確定される」）
+        body.addEventListener('change', function () { read(); refresh(); });
         m.querySelector('#wk-cancel').onclick = closeModal;
         if (w) m.querySelector('#wk-del').onclick = function () { Store.remove('work', 'day', w.id); closeModal(); renderAll(); };
         m.querySelector('#wk-ok').onclick = function () {
