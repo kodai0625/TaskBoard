@@ -335,6 +335,13 @@
     return (b.createdAt || 0) - (a.createdAt || 0);
   }
 
+  /** 行の右の「編集」ボタン（2026-10-23 ko-dai さん：行そのものを押すと済み、直すのはこのボタンから） */
+  function editBtn(act) {
+    return '<button type="button" class="tedit" data-act="' + act + '" aria-label="編集" title="編集">'
+      + '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M14.06 4.94 19.06 9.94 9 20H4v-5L14.06 4.94Zm1.41-1.41 1.77-1.77a1.5 1.5 0 0 1 2.12 0l2.88 2.88a1.5 1.5 0 0 1 0 2.12L20.47 8.53l-5-5Z"/></svg>'
+      + '</button>';
+  }
+
   function taskRow(t) {
     var sub = prioBadge(t) + doBadge(t) + dueBadge(t.due) + (t.time ? '<span class="due">' + timeLabel(t) + '</span>' : '')
       + (t.note ? '<span class="hasnote">メモあり</span>' : '');
@@ -342,10 +349,11 @@
       + '<button type="button" class="ck" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       + '</button>'
-      + '<button type="button" class="tbody" data-act="edit">'
+      + '<button type="button" class="tbody" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
       + '<span class="ttl">' + U.esc(t.title) + '</span>'
       + (sub ? '<span class="sub">' + sub + '</span>' : '')
       + '</button>'
+      + editBtn('edit')
       + '</div>';
   }
 
@@ -419,9 +427,9 @@
       + '<button type="button" class="ck" data-act="htoggle" aria-label="' + (done ? '今日の済みを取り消す' : '今日は済み') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       + '</button>'
-      + '<button type="button" class="tbody" data-act="edit">'
+      + '<button type="button" class="tbody" data-act="htoggle" aria-label="' + (done ? '今日の済みを取り消す' : '今日は済み') + '">'
       + '<span class="ttl">' + U.esc(h.title) + '</span><span class="sub">' + sub + '</span>'
-      + '</button></div>';
+      + '</button>' + editBtn('edit') + '</div>';
   }
 
   function renderHabits(habits, iso) {
@@ -570,19 +578,19 @@
     var sp = spIn || space();
     var t = Store.get(sp, 'task', id);
     if (!t || isDev(t) || isHabit(t)) return;   // 写しは済みにしない。習慣は日ごと（toggleHabit）
+    var prevDone = !!t.done, prevAt = t.doneAt || 0;
     t.done = !t.done;
     t.doneAt = t.done ? Date.now() : 0;
     Store.put(sp, 'task', t);
     renderAll();
-    if (t.done) {
-      toast('済みにしました', function () {
-        var cur = Store.get(sp, 'task', id);
-        if (!cur) return;
-        cur.done = false; cur.doneAt = 0;
-        Store.put(sp, 'task', cur);
-        renderAll();
-      });
-    }
+    // 行を押すだけで入れ替わるので、どちら向きでも「もどす」を出す（押しまちがえたとき、すぐ戻せるように）
+    toast(t.done ? '済みにしました' : '未完了にもどしました', function () {
+      var cur = Store.get(sp, 'task', id);
+      if (!cur) return;
+      cur.done = prevDone; cur.doneAt = prevAt;
+      Store.put(sp, 'task', cur);
+      renderAll();
+    });
   }
 
   function editTask(id, spIn, ctxIso) {
@@ -835,11 +843,11 @@
         + loose.map(function (x) {
             return '<div class="trow pl ' + x.sp + (x.habit ? ' habit' : '') + (x.done ? ' done' : '') + '" data-id="' + U.esc(x.t.id) + '" data-sp="' + x.sp + '" data-prio="' + prioOf(x.t) + '">'
               + planCheck(x).replace('class="ck"', 'class="ck"')
-              + '<button type="button" class="tbody" data-act="pedit"><span class="ttl">' + U.esc(x.t.title) + '</span>'
+              + '<button type="button" class="tbody" data-act="ptoggle"><span class="ttl">' + U.esc(x.t.title) + '</span>'
               + '<span class="sub"><span class="sptag ' + x.sp + '">' + label(x.sp) + '</span>'
               + (x.habit ? '<span class="reptag">↻ ' + U.esc(repeatLabel(x.t)) + '</span>' : '')
               + (x.habit && movedFrom(x.t, iso) ? '<span class="movetag">↪ ' + U.md(movedFrom(x.t, iso)) + 'の分</span>' : '')
-              + prioBadge(x.t) + '</span></button></div>';
+              + prioBadge(x.t) + '</span></button>' + editBtn('pedit') + '</div>';
           }).join('') + '</div>';
     }
 
@@ -2271,12 +2279,14 @@
       var row = b.closest('.trow');
       if (!row) return;
       if (b.dataset.act === 'view') { viewDev(row.dataset.id); return; }
+      // 行の本文を押しても、左の丸を押しても済みになる。光るのはどちらでも左の丸
+      var ck = row.querySelector('.ck');
       if (b.dataset.act === 'htoggle') {
         var hb = Store.get(space(), 'task', row.dataset.id);
-        if (hb && !habitDone(hb, U.today()) && !b.classList.contains('pop')) {
-          b.classList.add('pop');
+        if (hb && !habitDone(hb, U.today()) && !ck.classList.contains('pop')) {
+          ck.classList.add('pop');
           setTimeout(function () { toggleHabit(space(), row.dataset.id, U.today()); }, 380);
-        } else if (!b.classList.contains('pop')) {
+        } else if (!ck.classList.contains('pop')) {
           toggleHabit(space(), row.dataset.id, U.today());
         }
         return;
@@ -2284,10 +2294,10 @@
       if (b.dataset.act === 'toggle') {
         // 済みにするときだけ、金の丸と光を見せてから入れ替える（戻すときはすぐ）
         var cur = Store.get(space(), 'task', row.dataset.id);
-        if (cur && !cur.done && !isDev(cur) && !b.classList.contains('pop')) {
-          b.classList.add('pop');
+        if (cur && !cur.done && !isDev(cur) && !ck.classList.contains('pop')) {
+          ck.classList.add('pop');
           setTimeout(function () { toggleTask(row.dataset.id); }, 380);
-        } else if (!b.classList.contains('pop')) {
+        } else if (!ck.classList.contains('pop')) {
           toggleTask(row.dataset.id);
         }
       }

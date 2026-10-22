@@ -550,3 +550,9 @@ a.alink .aname::after{content:" ↗"; color:var(--gold); font-weight:400; font-s
 .modal select{width:100%; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); font-size:16px}
 .bonce button{padding:6px 14px}
 .bonce button.on{background:var(--gold); border-color:var(--gold); color:#2a2433; font-weight:700}
+
+/* 行の右の「編集」ボタン（2026-10-23）。行そのものを押すと済み、直すのはこのボタンから */
+.tedit{flex:0 0 auto; align-self:center; width:36px; height:36px; margin:0 2px 0 4px; padding:0; display:grid; place-items:center;
+  border:1px solid var(--line); border-radius:50%; background:var(--card); color:var(--dim)}
+.tedit:active{background:var(--gold-soft); color:var(--ink)}
+.trow.done .tedit{opacity:.7}
