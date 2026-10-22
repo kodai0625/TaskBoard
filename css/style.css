@@ -589,3 +589,19 @@ a.alink .aname::after{content:" ↗"; color:var(--gold); font-weight:400; font-s
 .sleepline{position:absolute; left:40px; right:0; height:0; border-top:2px dashed var(--c-personal); z-index:3; pointer-events:none}
 .sleepline span{position:absolute; left:4px; top:-17px; font-size:10.5px; font-weight:700; color:var(--c-personal); background:var(--paper); padding:0 4px; border-radius:4px}
 .ev.auto{border-style:dashed; border-left-style:solid}
+
+/* その日の仕事の画面：店を移動して働く日（2026-10-23） */
+.wkseg{border:1px solid var(--line); border-radius:12px; background:var(--card); padding:10px; margin-bottom:6px; display:flex; flex-direction:column; gap:8px}
+.wkseg-h{display:flex; align-items:center; justify-content:space-between; font-size:12.5px; font-weight:700; color:var(--c-work)}
+.wkseg-h .linkbtn{font-size:12px}
+.wkseg .seg3 button{padding:6px 14px}
+.wkseg .seg3 button.on,#wk-mode button.on{background:var(--c-work); border-color:var(--c-work); color:#fff; font-weight:700}
+#wk-mode button{padding:6px 16px}
+.wktimes{display:flex; gap:8px}
+.wktimes label{flex:1; display:flex; flex-direction:column; gap:3px; font-size:11.5px; color:var(--dim)}
+.wktimes input{width:100%; padding:9px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--ink); font-size:16px}
+.wkhint{margin:0}
+.wkhint:empty{display:none}
+.wkmove{display:flex; align-items:center; justify-content:center; gap:6px; font-size:12.5px; color:var(--c-work); font-weight:700; margin:2px 0 8px}
+.wkmove input{width:56px; padding:6px; border:1px solid var(--line); border-radius:8px; text-align:center; font-size:16px; background:var(--card); color:var(--ink)}
+.wkadd{display:block; width:100%; margin:4px 0 10px; border-style:dashed; color:var(--c-work); font-weight:700}

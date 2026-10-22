@@ -868,18 +868,53 @@
   }
 
   function workOf(iso) { var r = Store.get('work', 'day', 'day-w-' + iso); return r && !r.deleted ? r : null; }
-  /** 仕事の時間（分。0時を越える分は1440を足す）と通勤（片道・分）。休み・未入力は null。退勤を押した日は、退勤の時刻で終わる */
-  function workSpan(iso) {
-    var w = workOf(iso);
-    if (!w || w.off || !w.start || !w.end) return null;
-    var s = toMin(w.start), e = toMin(w.clockOut || w.end);
-    if (e <= s) e += 1440;
-    var p = w.place ? placeOf(w.place) : null;
-    return { s: s, e: e, com: Math.max(0, Number(p && p.commute) || 0), out: !!w.clockOut, w: w, p: p };
+  /** その日の勤務（店ごとの並び）。前の形（店が1つ：place・start・end）も読む */
+  function segsOf(w) {
+    if (!w || w.off) return [];
+    var list = Array.isArray(w.segs) && w.segs.length ? w.segs : (w.start && w.end ? [{ place: w.place, shift: w.shift, start: w.start, end: w.end }] : []);
+    return list.filter(function (x) { return x && x.start && x.end; });
   }
-  function workName(w) {
-    var p = w && w.place ? placeOf(w.place) : null, sh = p ? shiftsOf(p).filter(function (s) { return s.id === w.shift; })[0] : null;
+  /** 仕事の時間（分。0時を越える分は1440を足す）。店を移動する日は店ごとの区切り（segs）と店の移動（move・分）。
+      通勤（片道・分）は、行きは最初の店、帰りは最後の店のもの。休み・未入力は null。退勤を押した日は、退勤の時刻で終わる */
+  function workSpan(iso) {
+    var w = workOf(iso), list = segsOf(w);
+    if (!list.length) return null;
+    var segs = [], prev = -1;
+    list.forEach(function (x) {
+      var s = toMin(x.start), e = toMin(x.end);
+      if (s < prev && prev - s > 720) s += 1440;        // 前の店が夜中まで続いたあとの、次の日の朝の出勤だけを次の日として読む
+      while (e <= s) e += 1440;
+      var p = x.place ? placeOf(x.place) : null;
+      segs.push({ s: s, e: e, place: x.place, shift: x.shift, p: p, com: Math.max(0, Number(p && p.commute) || 0) });
+      prev = e;
+    });
+    if (w.clockOut) {                                   // 退勤：その時刻より後の店は外し、いた店はその時刻で終わる
+      var t = toMin(w.clockOut);
+      if (t < segs[0].s - 120) t += 1440;
+      var kept = segs.filter(function (g) { return g.s < t; });
+      if (kept.length) { segs = kept; segs[segs.length - 1].e = Math.max(segs[segs.length - 1].s + 5, t); }
+    }
+    var first = segs[0], last = segs[segs.length - 1];
+    return { s: first.s, e: last.e, comIn: first.com, comOut: last.com, segs: segs, move: Math.max(0, Number(w.move) || 0), out: !!w.clockOut, w: w };
+  }
+  /** 店の呼び名（時間帯が2つ以上ある店は、時間帯の名前も付ける） */
+  function segName(g) {
+    var p = g && g.place ? placeOf(g.place) : null, sh = p ? shiftsOf(p).filter(function (s) { return s.id === g.shift; })[0] : null;
     return p ? p.name + (sh && sh.name && shiftsOf(p).length > 1 ? ' ' + sh.name : '') : '仕事';
+  }
+  /** 時間割に出す帯（通勤・店ごとの仕事・店の移動）。off は日をまたいで出すときのずらし（前の日の分は -1440） */
+  function workBands(ws, off) {
+    var out = [];
+    if (!ws) return out;
+    off = off || 0;
+    if (ws.comIn) out.push({ cls: 'commute', s: ws.s - ws.comIn + off, e: ws.s + off, text: '通勤 ' + ws.comIn + '分' });
+    ws.segs.forEach(function (g, i) {
+      out.push({ cls: 'workband', s: g.s + off, e: g.e + off, text: U.esc(segName(g)) + ' ' + clock(g.s) + '〜' + clock(g.e) + (off ? '（前の日から）' : '') });
+      var next = ws.segs[i + 1];
+      if (next && ws.move) out.push({ cls: 'commute', s: g.e + off, e: Math.min(g.e + ws.move, next.s) + off, text: '店の移動 ' + ws.move + '分' });
+    });
+    if (ws.comOut) out.push({ cls: 'commute', s: ws.e + off, e: ws.e + ws.comOut + off, text: '通勤 ' + ws.comOut + '分' });
+    return out;
   }
 
   /** その日の動かせない予定。仕事は、家を出てから帰るまで（通勤をふくむ）。
@@ -892,7 +927,7 @@
       out.push({ s: s, e: s + durOf(x.t) });
     });
     var w = workSpan(iso);
-    if (w) out.push({ s: w.s - w.com, e: w.e + w.com });
+    if (w) out.push({ s: w.s - w.comIn, e: w.e + w.comOut });
     return out.sort(function (a, b) { return a.s - b.s; });
   }
   function lastEnd(fixed) { return fixed.reduce(function (m, f) { return Math.max(m, f.e); }, -1); }
@@ -947,8 +982,17 @@
       busy.push({ s: s - c.gapMin, e: s + durOf(x.t) + c.gapMin });
     });
     var base = cut(dayWin, busy);
-    var own = cut(base, work ? [{ s: work.s - work.com - c.gapMin, e: work.e + work.com + c.gapMin }] : []);
-    var inWork = work ? cut(base, [{ s: -1e9, e: work.s }, { s: work.e, e: 1e9 }]) : [];
+    // 個人のタスクは、通勤・店ごとの仕事・店の移動を避ける。会社のタスクは、店ごとの仕事の時間の中
+    var own = base, inWork = [];
+    if (work) {
+      var pb = [{ s: work.s - work.comIn - c.gapMin, e: work.s }];
+      work.segs.forEach(function (g, i) {
+        var next = work.segs[i + 1];
+        pb.push({ s: g.s - c.gapMin, e: (next ? Math.min(g.e + work.move, next.s) : g.e + work.comOut) + c.gapMin });
+      });
+      own = cut(base, pb);
+      work.segs.forEach(function (g) { inWork = inWork.concat(cut(base, [{ s: -1e9, e: g.s }, { s: g.e, e: 1e9 }])); });
+    }
 
     var soon = shiftIso(iso, 3), cands = [], freed = [];
     Store.SPACES.forEach(function (sp) {
@@ -1058,79 +1102,144 @@
     w.clockOut = fromMin(now);
     Store.put('work', 'day', w);
     var sp = workSpan(iso);
-    applyPlan(iso, { from: now + (sp ? sp.com : 0), label: '退勤しました。残りを組みました', undo: function () {
+    applyPlan(iso, { from: now + (sp ? sp.comOut : 0), label: '退勤しました。残りを組みました', undo: function () {
       var cur = workOf(iso);
       if (cur) { if (prev) cur.clockOut = prev; else delete cur.clockOut; Store.put('work', 'day', cur); }
     } });
   }
 
-  /** その日の仕事を入れる・直す（会社の側の記録として同期する）。決めたら、その日を組む */
+  /** その日の仕事を入れる・直す（会社の側の記録として同期する）。店を移動して働く日は、店を足していく（3つまで）。
+      決めたら、その日を組む */
   function editWork(iso) {
     var w = workOf(iso), places = workplaces();
-    var d = U.parse(iso), dow = String(d.getDay());
-    var cur = { off: !!(w && w.off), place: (w && w.place) || (places[0] && places[0].id) || '', shift: (w && w.shift) || '',
-                start: (w && w.start) || '', end: (w && w.end) || '' };
-    if (!w && places[0]) { var r0 = ruleTimes(places[0], '', iso); if (r0) { cur.shift = r0.shift; cur.start = r0.start; cur.end = r0.end; } }
-    if (!cur.start) { cur.start = '10:00'; cur.end = '22:00'; }
+    var d = U.parse(iso);
+    // 店の移動の時間：前に移動した日の値を使う（無ければ30分）
+    var lastMove = 30;
+    for (var i = 1; i <= 60; i++) { var pw = workOf(shiftIso(iso, -i)); if (pw && segsOf(pw).length > 1 && pw.move != null) { lastMove = pw.move; break; } }
+    var st = { off: !!(w && w.off), move: w && w.move != null ? w.move : lastMove, segs: segsOf(w).map(function (x) { return { place: x.place, shift: x.shift, start: x.start, end: x.end }; }) };
+    if (!st.segs.length) st.segs.push(newSeg(null));
+
+    /** 新しい店の行。前の店があれば、ちがう店・前の店より後に始まる時間帯を選び、前の店の退勤を「出勤−移動」に寄せる */
+    function newSeg(prev) {
+      var p = places.filter(function (x) { return !prev || x.id !== prev.place; })[0] || places[0];
+      var g = { place: p ? p.id : '', shift: '', start: '10:00', end: '22:00' };
+      if (!p) return g;
+      var list = shiftsOf(p), sh = list[0];
+      if (prev) sh = list.filter(function (x) { return toMin(x.start) > toMin(prev.start); })[0] || list[0];
+      var r = ruleTimes(p, sh && sh.id, iso);
+      if (r) { g.shift = r.shift; g.start = r.start; g.end = r.end; }
+      if (prev) {
+        var ps = toMin(prev.start), pe = toMin(prev.end), ns = toMin(g.start);
+        if (pe <= ps) pe += 1440;
+        if (ns <= ps) ns += 1440;
+        if (pe > ns - st.move && ns - st.move - ps >= 60) prev.end = fromMin((ns - st.move) % 1440);
+      }
+      return g;
+    }
+
     modal('<h2>' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + DOW[d.getDay()] + '）の仕事</h2>'
-      + '<div class="f"><label>どこで働くか</label><div class="seg3 wkplace" id="wk-place">'
-      + places.map(function (p) { return '<button type="button" data-place="' + U.esc(p.id) + '"' + (!cur.off && cur.place === p.id ? ' class="on"' : '') + '>' + U.esc(p.name) + '</button>'; }).join('')
-      + '<button type="button" data-place=""' + (cur.off ? ' class="on"' : '') + '>休み</button></div>'
+      + '<div class="f"><div class="seg3" id="wk-mode"><button type="button" data-off="0"' + (st.off ? '' : ' class="on"') + '>仕事あり</button>'
+      + '<button type="button" data-off="1"' + (st.off ? ' class="on"' : '') + '>休み</button></div>'
       + (places.length ? '' : '<div class="hint" style="margin-top:6px">職場の決まりがまだ届いていません（同期を待つか、時間を手で入れてください）</div>') + '</div>'
-      + '<div class="f" id="wk-shiftf" hidden><label>時間帯</label><div class="seg3" id="wk-shift"></div></div>'
-      + '<div class="f" id="wk-times"' + (cur.off ? ' hidden' : '') + '><label>出勤 と 退勤</label><div class="f2">'
-      + '<input type="time" id="wk-s" step="300" value="' + cur.start + '"><input type="time" id="wk-e" step="300" value="' + cur.end + '"></div>'
-      + '<div class="hint" style="margin-top:6px" id="wk-hint"></div></div>'
+      + '<div id="wk-body"></div>'
       + '<div class="hint">決めると、この日の予定を組みます（出勤の前に入れられるものも入れます。あとから自分で直せます）。</div>'
       + '<div class="acts">' + (w ? '<button type="button" class="del" id="wk-del">消す</button>' : '')
       + '<button type="button" id="wk-cancel">やめる</button><button type="button" class="go" id="wk-ok">決める</button></div>',
       function (m) {
-        var st = { off: cur.off, place: cur.place, shift: cur.shift };
-        function hint() {
-          var p = placeOf(st.place), s = m.querySelector('#wk-s').value, e = m.querySelector('#wk-e').value;
-          m.querySelector('#wk-hint').textContent = (p ? '通勤は片道 ' + (p.commute || 0) + '分で組みます。' : '')
-            + (s && e && toMin(e) <= toMin(s) ? '退勤は次の日の ' + e + ' です。' : '');
+        var body = m.querySelector('#wk-body');
+        /** 欄に打った時刻を、描き直す前に st へ戻す */
+        function read() {
+          body.querySelectorAll('[data-seg]').forEach(function (box) {
+            var g = st.segs[+box.dataset.seg];
+            if (!g) return;
+            g.start = box.querySelector('.wk-s').value || g.start;
+            g.end = box.querySelector('.wk-e').value || g.end;
+          });
+          var mv = body.querySelector('#wk-move');
+          if (mv) st.move = Math.max(0, Math.min(240, Number(String(mv.value).normalize('NFKC')) || 0));
         }
-        function paintShift(fill) {
-          var p = placeOf(st.place), list = shiftsOf(p);
-          m.querySelector('#wk-shiftf').hidden = st.off || list.length < 2;
-          if (list.length && !list.some(function (s) { return s.id === st.shift; })) st.shift = list[0].id;
-          m.querySelector('#wk-shift').innerHTML = list.map(function (s) {
-            return '<button type="button" data-shift="' + U.esc(s.id) + '"' + (s.id === st.shift ? ' class="on"' : '') + '>' + U.esc(s.name || '通し') + '</button>';
-          }).join('');
-          if (fill && p) {
-            var r = ruleTimes(p, st.shift, iso);
-            if (r) { m.querySelector('#wk-s').value = r.start; m.querySelector('#wk-e').value = r.end; }
+        function paint() {
+          if (st.off) { body.innerHTML = ''; return; }
+          var h = '';
+          st.segs.forEach(function (g, i) {
+            var p = placeOf(g.place), list = shiftsOf(p);
+            if (i) h += '<div class="wkmove">⇣ 店の移動 <input type="text" inputmode="numeric" id="wk-move" value="' + st.move + '"> 分</div>';
+            h += '<div class="wkseg" data-seg="' + i + '">'
+              + (st.segs.length > 1 ? '<div class="wkseg-h">' + (i + 1) + 'つ目の店<button type="button" class="linkbtn" data-rm="' + i + '">外す</button></div>' : '')
+              + '<div class="seg3 wkplace">' + places.map(function (x) {
+                  return '<button type="button" data-place="' + U.esc(x.id) + '"' + (x.id === g.place ? ' class="on"' : '') + '>' + U.esc(x.name) + '</button>';
+                }).join('') + '</div>'
+              + (list.length > 1 ? '<div class="seg3 wkshift">' + list.map(function (x) {
+                  return '<button type="button" data-shift="' + U.esc(x.id) + '"' + (x.id === g.shift ? ' class="on"' : '') + '>' + U.esc(x.name || '通し') + '</button>';
+                }).join('') + '</div>' : '')
+              + '<div class="f2 wktimes"><label>出勤<input type="time" class="wk-s" step="300" value="' + g.start + '"></label>'
+              + '<label>退勤<input type="time" class="wk-e" step="300" value="' + g.end + '"></label></div>'
+              + '<div class="hint wkhint">' + U.esc((p ? '通勤は片道 ' + (p.commute || 0) + '分。' : '') + (toMin(g.end) <= toMin(g.start) ? '退勤は次の日の ' + g.end + ' です。' : '')) + '</div>'
+              + '</div>';
+          });
+          if (st.segs.length < 3 && places.length > 1) h += '<button type="button" class="mini wkadd" id="wk-add">＋ 店を移動して、もう1つ働く</button>';
+          var bad = check();
+          if (bad) h += '<div class="warnbox">' + U.esc(bad) + '</div>';
+          body.innerHTML = h;
+        }
+        /** 時間の並びを確かめる（前の店の退勤より後に、次の店へ出勤する） */
+        function check() {
+          var prev = -1;
+          for (var k = 0; k < st.segs.length; k++) {
+            var g = st.segs[k], s = toMin(g.start), e = toMin(g.end);
+            if (!g.start || !g.end) return (k + 1) + 'つ目の出勤と退勤を入れてください';
+            if (s === e) return (k + 1) + 'つ目の出勤と退勤が同じです';
+            if (s < prev && prev - s > 720) s += 1440;
+            if (e <= s) e += 1440;
+            if (k && s < prev) return (k + 1) + 'つ目の出勤が、前の店の退勤より前です';
+            prev = e;
           }
-          m.querySelector('#wk-times').hidden = st.off;
-          hint();
+          return '';
         }
-        paintShift(false);
-        m.querySelector('#wk-place').addEventListener('click', function (e) {
-          var b = e.target.closest('[data-place]');
+        paint();
+        m.querySelector('#wk-mode').addEventListener('click', function (e) {
+          var b = e.target.closest('[data-off]');
           if (!b) return;
-          st.off = !b.dataset.place; if (!st.off) st.place = b.dataset.place;
-          m.querySelectorAll('#wk-place [data-place]').forEach(function (x) { x.classList.toggle('on', x === b); });
-          paintShift(true);
+          read();
+          st.off = b.dataset.off === '1';
+          m.querySelectorAll('#wk-mode [data-off]').forEach(function (x) { x.classList.toggle('on', x === b); });
+          paint();
         });
-        m.querySelector('#wk-shift').addEventListener('click', function (e) {
-          var b = e.target.closest('[data-shift]');
+        body.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-place],[data-shift],[data-rm],#wk-add');
           if (!b) return;
-          st.shift = b.dataset.shift;
-          paintShift(true);
+          read();
+          var box = b.closest('[data-seg]'), g = box ? st.segs[+box.dataset.seg] : null;
+          if (b.id === 'wk-add') { st.segs.push(newSeg(st.segs[st.segs.length - 1])); }
+          else if (b.dataset.rm != null) { st.segs.splice(+b.dataset.rm, 1); }
+          else if (g && b.dataset.place != null) {
+            g.place = b.dataset.place; g.shift = '';
+            var r = ruleTimes(placeOf(g.place), '', iso);
+            if (r) { g.shift = r.shift; g.start = r.start; g.end = r.end; }
+          } else if (g && b.dataset.shift != null) {
+            g.shift = b.dataset.shift;
+            var r2 = ruleTimes(placeOf(g.place), g.shift, iso);
+            if (r2) { g.start = r2.start; g.end = r2.end; }
+          }
+          paint();
         });
-        ['#wk-s', '#wk-e'].forEach(function (id) { m.querySelector(id).addEventListener('change', hint); });
+        body.addEventListener('change', function () { read(); paint(); });
         m.querySelector('#wk-cancel').onclick = closeModal;
         if (w) m.querySelector('#wk-del').onclick = function () { Store.remove('work', 'day', w.id); closeModal(); renderAll(); };
         m.querySelector('#wk-ok').onclick = function () {
-          var s = m.querySelector('#wk-s').value, e = m.querySelector('#wk-e').value;
-          if (!st.off && (!s || !e)) { toast('出勤と退勤を入れてください'); return; }
-          if (!st.off && s === e) { toast('出勤と退勤が同じです'); return; }
+          read();
+          var bad = st.off ? '' : check();
+          if (bad) { toast(bad); paint(); return; }
           var rec = w || { id: 'day-w-' + iso, type: 'work', date: iso, createdAt: Date.now() };
-          rec.off = st.off; rec.place = st.off ? '' : st.place; rec.shift = st.off ? '' : st.shift;
-          rec.start = st.off ? '' : s; rec.end = st.off ? '' : e; rec.from = '';      // 手で決めた（Diem の取り込みより強い）
+          rec.off = st.off;
+          rec.segs = st.off ? [] : st.segs.map(function (g) { return { place: g.place, shift: g.shift, start: g.start, end: g.end }; });
+          rec.move = st.segs.length > 1 ? st.move : (rec.move != null ? rec.move : st.move);
+          // 1つしか見ない古い道具のために、最初の店と、出勤（最初）・退勤（最後）も持っておく
+          var f = rec.segs[0], l = rec.segs[rec.segs.length - 1];
+          rec.place = f ? f.place : ''; rec.shift = f ? f.shift : ''; rec.start = f ? f.start : ''; rec.end = l ? l.end : '';
+          rec.from = '';                                // 手で決めた（Diem の取り込みより強い）
           delete rec.clockOut;
-          rec.text = st.off ? '仕事 休み' : '仕事 ' + workName(rec) + ' ' + s + '〜' + e;
+          rec.text = st.off ? '仕事 休み' : '仕事 ' + rec.segs.map(function (g) { return segName(g) + ' ' + g.start + '〜' + g.end; }).join(' → ');
           Store.put('work', 'day', rec);
           closeModal();
           applyPlan(iso, { label: 'この日を組みました' });
@@ -1167,9 +1276,11 @@
     var work;
     if (!w) work = '<span class="pv dim">まだ入れていません</span><button type="button" class="mini" data-act="pwork">入れる</button>';
     else if (w.off) work = '<span class="pv">休み' + (w.from === 'diem' ? '<small>（Diem から）</small>' : '') + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
-    else work = '<span class="pv"><b>' + U.esc(workName(w)) + '</b> ' + U.esc(w.start) + '〜' + U.esc(w.clockOut || w.end)
-      + (w.clockOut ? '<small>（退勤ずみ）</small>' : toMin(w.end) <= toMin(w.start) ? '<small>（次の日まで）</small>' : '')
-      + (ws && ws.com ? '<small>・通勤 片道' + ws.com + '分</small>' : '') + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
+    else work = '<span class="pv">' + (ws ? ws.segs.map(function (g) { return '<b>' + U.esc(segName(g)) + '</b> ' + clock(g.s) + '〜' + clock(g.e); }).join(' → ') : '')
+      + (w.clockOut ? '<small>（退勤ずみ）</small>' : ws && ws.e > 1440 ? '<small>（次の日まで）</small>' : '')
+      + (ws && (ws.comIn || ws.comOut) ? '<small>・通勤 片道' + (ws.comIn === ws.comOut ? ws.comIn : ws.comIn + '／' + ws.comOut) + '分</small>' : '')
+      + (ws && ws.segs.length > 1 && ws.move ? '<small>・店の移動 ' + ws.move + '分</small>' : '')
+      + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
     var out = '';
     if (w && !w.off && iso === today) {
       out = w.clockOut
@@ -1204,7 +1315,7 @@
     var sl = sleepOf(iso), ws = workSpan(iso);
     // 前の日の仕事・通勤・睡眠が0時を越えてこの日にかかる分（例：3:30まで働いた次の日）
     var pw = workSpan(shiftIso(iso, -1)), pbed = sleepOf(shiftIso(iso, -1)).bed - 1440;
-    var carry = pw && pw.e + pw.com > 1440 ? { e: pw.e - 1440, home: pw.e + pw.com - 1440, w: pw.w, com: pw.com } : null;
+    var carry = !!(pw && pw.e + pw.comOut > 1440);
     var all = planItems(iso);
     var loose = all.filter(function (x) { return !x.time; });
     var timed = all.filter(function (x) { return x.time; }).map(function (x) {
@@ -1239,7 +1350,7 @@
     var startH = carry ? 0 : Math.max(0, Math.min(7, Math.floor(sl.wake / 60) - 1)), endH = 22;
     timed.forEach(function (x) { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.ceil(x.e / 60)); });
     endH = Math.max(endH, Math.min(24, Math.ceil(sl.bed / 60) + 1));
-    if (ws) { startH = Math.min(startH, Math.floor((ws.s - ws.com) / 60)); endH = Math.max(endH, Math.ceil(Math.min(1440, ws.e + ws.com) / 60)); }
+    if (ws) { startH = Math.min(startH, Math.max(0, Math.floor((ws.s - ws.comIn) / 60))); endH = Math.max(endH, Math.ceil(Math.min(1440, ws.e + ws.comOut) / 60)); }
     if (iso === today) {
       var nowM = nowMin();
       startH = Math.min(startH, Math.floor(nowM / 60)); endH = Math.max(endH, Math.ceil((nowM + 1) / 60));
@@ -1261,14 +1372,7 @@
     }
     // 睡眠（個人の色）・仕事と通勤（会社の色）
     h += block('sleepblock', Math.max(top0, pbed > 0 ? pbed : 0), sl.wake, '睡眠') + block('sleepblock', sl.bed, bot0, '睡眠');
-    if (carry) {
-      if (carry.e > 0) h += block('workband', 0, carry.e, U.esc(workName(carry.w)) + '（前の日から）〜' + clock(carry.e));
-      if (carry.com) h += block('commute', Math.max(0, carry.e), carry.home, '通勤 ' + carry.com + '分');
-    }
-    if (ws) {
-      h += block('workband', ws.s, ws.e, U.esc(workName(ws.w)) + ' ' + clock(ws.s) + '〜' + clock(ws.e));
-      if (ws.com) h += block('commute', ws.s - ws.com, ws.s, '通勤 ' + ws.com + '分') + block('commute', ws.e, ws.e + ws.com, '通勤 ' + ws.com + '分');
-    }
+    workBands(pw, -1440).concat(workBands(ws, 0)).forEach(function (b) { h += block(b.cls, b.s, b.e, b.text); });
     if (sl.wake >= top0) h += '<div class="sleepline wake" style="top:' + px(sl.wake) + 'px"><span>起きる ' + clock(sl.wake) + '</span></div>';
     if (sl.bed < bot0) h += '<div class="sleepline bed" style="top:' + px(sl.bed) + 'px"><span>寝る ' + clock(sl.bed) + '</span></div>';
     timed.forEach(function (x) {
