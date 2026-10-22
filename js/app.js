@@ -755,7 +755,7 @@
             if (t.time && !t.doOn) t.doOn = U.today();                          // 時刻だけなら今日やる
           }
           // 自分で時刻・やる日を変えたら「自動」の印を外す（組み直しても動かさない）
-          if (t.auto && ((t.time || '') !== wasTime || (t.doOn || '') !== wasDo)) delete t.auto;
+          if (t.auto && ((t.time || '') !== wasTime || (t.doOn || '') !== wasDo)) { delete t.auto; delete t.autoFrom; }
           Store.put(sp, 'task', t);
           closeModal(); renderAll();
         };
@@ -835,7 +835,8 @@
        （仕事なら、家を出る時刻＝出勤−通勤）の「動き出すまで」前までには起きる
      ・寝る：次の日の起きる時刻−睡眠。その日の最後の予定（仕事なら、家に着く時刻＝退勤＋通勤）＋ゆとりより前にはしない
      ・会社のタスクは仕事の時間の中、個人のタスクは仕事と通勤の前後と休みの日へ（ko-dai さんの決定）
-     ・入れるもの：やる日・期限がその日のものと、その日の習慣。今日を組むときは、過ぎたものと、空きに期限3日以内・重要度 高も
+     ・入れるもの：やる日・期限がその日のものと、その日の習慣。今日を組むときは、過ぎたものと、空きに期限3日以内のものも。
+       ★期限もやる日も無いタスクは入れない（2026-10-23 ko-dai さん。前は重要度 高のものを空きに入れていた）
        （先の日を組むときに、ほかの日のものを連れてこないため）。やる日が先の日に決まっているものは前倒ししない
      ・夜中の0時を越える時刻には入れない（時刻はその日の中だけで持つため）
      ・組み方の数（睡眠7時間など）は、この端末の画面の覚え（tb.ui の planConf） */
@@ -1009,7 +1010,7 @@
         if (t.done || (t.doOn && t.doOn > iso)) return;               // やる日が先に決まっているものは前倒ししない
         var mine = t.doOn === iso || t.due === iso || t.auto === iso;
         var late = iso === today && ((t.doOn && t.doOn < iso) || (t.due && t.due < iso));
-        var rush = iso === today && !t.doOn && ((t.due && t.due <= soon) || prioOf(t) === 'high');
+        var rush = iso === today && !t.doOn && t.due && t.due <= soon;   // 期限もやる日も無いものは入れない
         if (mine || late) cands.push({ sp: sp, t: t, habit: false, tier: 0 });
         else if (rush) cands.push({ sp: sp, t: t, habit: false, tier: 1 });
       });
@@ -1060,21 +1061,29 @@
       var k = sp + '/' + t.id;
       if (touched[k]) return;
       touched[k] = true;
-      back.push({ sp: sp, id: t.id, time: t.time, dur: t.dur, doOn: t.doOn, auto: t.auto, autoAt: t.autoAt ? JSON.parse(JSON.stringify(t.autoAt)) : undefined });
+      back.push({ sp: sp, id: t.id, time: t.time, dur: t.dur, doOn: t.doOn, auto: t.auto, autoFrom: t.autoFrom,
+                  autoAt: t.autoAt ? JSON.parse(JSON.stringify(t.autoAt)) : undefined });
     }
     // 前に自動で入れた時刻を、いったん外す（入らなかったものは外れたまま）
     r.freed.forEach(function (x) {
       var t = Store.get(x.sp, 'task', x.t.id);
       if (!t) return;
       snapOf(x.sp, t);
-      if (x.habit) { if (t.autoAt) delete t.autoAt[iso]; } else { t.time = ''; t.dur = 0; delete t.auto; }
+      if (x.habit) { if (t.autoAt) delete t.autoAt[iso]; }
+      else {
+        t.time = ''; t.dur = 0; delete t.auto;
+        if ('autoFrom' in t) { t.doOn = t.autoFrom; delete t.autoFrom; }   // 自動で書いたやる日は、もとに戻す
+      }
     });
     r.placed.forEach(function (p) {
       var t = Store.get(p.sp, 'task', p.t.id);
       if (!t) return;
       snapOf(p.sp, t);
       if (p.habit) { t.autoAt = t.autoAt || {}; t.autoAt[iso] = fromMin(p.s); pruneAutoAt(t); }
-      else { t.time = fromMin(p.s); t.dur = p.e - p.s; t.doOn = iso; t.auto = iso; }
+      else {
+        if (!('autoFrom' in t) && (t.doOn || '') !== iso) t.autoFrom = t.doOn || '';   // もとのやる日（入らなくなったら戻す）
+        t.time = fromMin(p.s); t.dur = p.e - p.s; t.doOn = iso; t.auto = iso;
+      }
     });
     back.forEach(function (b) { var t = Store.get(b.sp, 'task', b.id); if (t) Store.put(b.sp, 'task', t); });
     planRuns[iso] = { at: Date.now(), placed: r.placed, left: r.left };
@@ -1084,7 +1093,7 @@
       back.forEach(function (b) {
         var t = Store.get(b.sp, 'task', b.id);
         if (!t) return;
-        ['time', 'dur', 'doOn', 'auto', 'autoAt'].forEach(function (k) { if (b[k] === undefined) delete t[k]; else t[k] = b[k]; });
+        ['time', 'dur', 'doOn', 'auto', 'autoFrom', 'autoAt'].forEach(function (k) { if (b[k] === undefined) delete t[k]; else t[k] = b[k]; });
         Store.put(b.sp, 'task', t);
       });
       delete planRuns[iso];
