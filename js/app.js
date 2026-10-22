@@ -248,7 +248,7 @@
     var memos = Store.list(space(), 'memo').length;
     document.getElementById('cntTask').textContent = open ? open : '';
     document.getElementById('cntMemo').textContent = memos ? memos : '';
-    var buy = Store.list(BUYSP, 'buy').filter(function (b) { return !b.done; }).length;
+    var buy = buyNeedCount();
     document.getElementById('cntBuy').textContent = buy ? buy : '';
   }
 
@@ -1007,154 +1007,210 @@
     );
   }
 
-  /* ================= 買い出し（会社の側だけ。2026-10-13 ko-dai さんの願い） =================
-     店で買うもののリスト。丸を押すと「買った」。買ったものは下にたたんで残し、丸を外すと「また買う」に戻る
-     （よく買うものを、打ち直さなくて済むように）。
-       ・受け口の GAS は task と memo しか受けないので、memo として送る（貼り直し不要）。
-         印は src:'buy'・id が buy- で始まること。Store が 'buy' という種類として出し入れし、メモの一覧には出さない（js/store.js）
-       ・中身：text（買うもの。受け口のシートの見出しにもなる）／count（個数。1〜999）／place（買う場所。空でもよい）
-               note（メモ）／done・doneAt（買った）／need（リストに入れた時刻。並びに使う）
-               （2026-10-13 の最初の形は qty＝数量を文字で持っていた。読めるように残してあり、直すと count に切りかわる）
-       ・一覧は買う場所ごとにまとめる。チェックボックスは四角（2026-10-19 ko-dai さん）
-       ・Obsidian へは書き出さない（書き出す.py が飛ばす）。買ったら用のなくなるものなので
-       ・Diem（2人のカレンダー）は task しか読まないので、そちらには出ない */
-  var BUYSP = 'work';
-  var showBought = false;
+  /* ================= 買い出し（会社の側だけ。2026-10-13 ko-dai さんの願い・2026-10-23 作り直し） =================
+     いつも使うものを「買い出し先」（ダイソー・セリア…）ごとに並べた一覧。いつも全部出ている。
+     買うものができたら、その品物に店舗ごとの個数を入れる。個数の入ったものが「今回買うもの」。
+     買ったらチェック → 個数が消えて、品物は一覧に残る（単発のものは消える）。
+       ・記録は memo の入れ物に同居（受け口の GAS は task と memo しか受けないため）。印はどれも src:'buy'・buy- で始まる id。
+         type で3つに分ける
+           'conf'  … 店舗の名前（id は buy-conf の1つだけ）。{ stores:[{id, name}] }
+                     ★店舗の名前はコードに書かない（公開しているコードから、勤め先の店が分からないように）。
+                       受け口のシートにだけある。最初の2つは Mac から入れた（2026-10-23）
+           'place' … 買い出し先。{ text:名前, once:単発か, order }
+           'item'  … 買うもの。{ text:名前, to:買い出し先の id（空ならその他）, once, want:{店舗id:個数}, note, order, lastAt }
+       ・単発（once）：買い出し先も買うものも、あとから「今回だけ」のものとして足せる。
+         単発の買うものは、買ったら消える。単発の買い出し先は、中の品物が無くなったら消える
+       ・絞り込み（今回買うもの・店舗・買い出し先）は、この端末の画面の覚えとして持つ（tb.ui の buyF）
+       ・Obsidian へは書き出さない（書き出す.py が飛ばす）。Diem は task しか読まないので、そちらにも出ない */
+  var BUYSP = 'work', BUY_CONF = 'buy-conf';
 
   function buyKey(s) { return String(s || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase(); }
-
-  /** 個数は1〜999の整数にそろえる（全角の数字でもよい） */
-  function buyCount(v) {
+  /** 個数は min〜999 の整数にそろえる（全角の数字でもよい） */
+  function buyCount(v, min) {
+    min = min == null ? 1 : min;
     var n = parseInt(String(v == null ? '' : v).normalize('NFKC'), 10);
-    return isNaN(n) || n < 1 ? 1 : Math.min(n, 999);
+    return isNaN(n) || n < min ? min : Math.min(n, 999);
   }
-  /** 個数の見せ方。前の形（数量を文字で持っていた分）は、そのまま出す */
-  function buyQtyLabel(b) { return b.count ? b.count + '個' : (b.qty || ''); }
+  /** −／＋ のボタンで、となりの個数の欄を1つずつ動かす（下限は欄の min） */
+  function stepCount(btn) {
+    var box = btn.closest('.stepper'), input = box && box.querySelector('input');
+    if (!input) return;
+    var min = Number(input.min) || 0;
+    input.value = buyCount(buyCount(input.value, min) + Number(btn.dataset.step), min);
+  }
 
-  function buyRow(b, withPlace) {
-    var q = buyQtyLabel(b);
-    return '<div class="trow buy' + (b.done ? ' done' : '') + '" data-id="' + U.esc(b.id) + '">'
-      + '<button type="button" class="ck" data-act="btoggle" aria-label="' + (b.done ? 'また買うものにもどす' : '買った') + '">'
-      + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-      + '</button>'
-      + '<button type="button" class="tbody" data-act="bedit">'
-      + '<span class="ttl">' + U.esc(b.text) + '</span>'
-      + (withPlace && b.place ? '<span class="place">' + U.esc(b.place) + '</span>' : '')
-      + (b.note ? '<span class="hasnote">メモあり</span>' : '')
-      + (q ? '<span class="qty">' + U.esc(q) + '</span>' : '')
+  function buyType(r) { return r.type || 'item'; }
+  function byOrder(a, b) { return (a.order || a.createdAt || 0) - (b.order || b.createdAt || 0); }
+  function buyConf() { var c = Store.get(BUYSP, 'buy', BUY_CONF); return c && !c.deleted ? c : null; }
+  function buyStores() { var c = buyConf(); return ((c && c.stores) || []).filter(function (x) { return x && x.id && x.name; }); }
+  function buyPlaces() { return Store.list(BUYSP, 'buy').filter(function (r) { return buyType(r) === 'place'; }).sort(byOrder); }
+  function buyItems() { return Store.list(BUYSP, 'buy').filter(function (r) { return buyType(r) === 'item'; }); }
+  /** 個数の入っている分だけ（0や壊れた値は落とす） */
+  function wantOf(it) {
+    var w = it.want || {}, out = {};
+    Object.keys(w).forEach(function (k) { var n = Number(w[k]); if (n > 0) out[k] = Math.min(999, Math.floor(n)); });
+    return out;
+  }
+  function wantN(it, store) {
+    var w = wantOf(it);
+    return store ? (w[store] || 0) : Object.keys(w).reduce(function (t, k) { return t + w[k]; }, 0);
+  }
+  function buyNeedCount() { return buyItems().filter(function (it) { return wantN(it) > 0; }).length; }
+  function buyF() {
+    var u = Store.ui();
+    if (!u.buyF || typeof u.buyF !== 'object') u.buyF = { need: false, store: '', place: '' };
+    return u.buyF;
+  }
+
+  function buyRow(it, stores, onlyStore) {
+    var w = wantOf(it), need = Object.keys(w).length > 0, known = {};
+    var chips = stores.filter(function (x) { known[x.id] = true; return w[x.id] && (!onlyStore || onlyStore === x.id); })
+      .map(function (x) { return '<span class="want">' + U.esc(x.name) + ' <b>' + w[x.id] + '</b></span>'; }).join('');
+    // 店舗の名前が消えたあとに残った個数も、数だけは出す（黙って見えなくしない）
+    Object.keys(w).forEach(function (k) { if (!known[k] && !onlyStore) chips += '<span class="want">店舗？ <b>' + w[k] + '</b></span>'; });
+    return '<div class="trow buy' + (need ? ' need' : '') + '" data-id="' + U.esc(it.id) + '">'
+      + (need
+        ? '<button type="button" class="ck" data-act="bbought" aria-label="買った">'
+          + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'
+        : '<button type="button" class="ck ro" data-act="bopen" aria-label="今回買う個数を入れる"></button>')
+      + '<button type="button" class="tbody" data-act="bopen">'
+      + '<span class="ttl">' + U.esc(it.text) + '</span>'
+      + (it.once ? '<span class="oncetag">単発</span>' : '')
+      + (it.note ? '<span class="hasnote">メモあり</span>' : '')
+      + '<span class="wants">' + (chips || '<span class="wadd">個数</span>') + '</span>'
       + '</button></div>';
   }
 
   function renderBuy() {
-    var all = Store.list(BUYSP, 'buy');
-    var open = all.filter(function (b) { return !b.done; })
-      .sort(function (a, b) { return (a.need || a.createdAt || 0) - (b.need || b.createdAt || 0); });
-    var done = all.filter(function (b) { return b.done; })
-      .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
-    // 買う場所ごとにまとめる（店に着いたら、その店の分だけ見ればよいように）。並びは、先に入れたものがある店から。
-    // 場所の無いものは最後に。全部に場所が無ければ、見出しは出さない
-    var groups = [], by = Object.create(null);
-    open.forEach(function (b) {
-      var k = (b.place || '').trim();
-      if (!by[k]) { by[k] = { place: k, items: [] }; groups.push(by[k]); }
-      by[k].items.push(b);
+    var f = buyF(), stores = buyStores(), places = buyPlaces(), items = buyItems();
+    var known = {};
+    places.forEach(function (p) { known[p.id] = true; });
+    if (f.store && !stores.some(function (x) { return x.id === f.store; })) f.store = '';
+    if (f.place && f.place !== '-' && !known[f.place]) f.place = '';
+    var others = items.filter(function (it) { return !it.to || !known[it.to]; });
+
+    var h = '<div class="bfilter">'
+      + '<button type="button" class="chip' + (f.need ? ' on' : '') + '" data-fneed="1">今回買うもの <b>' + buyNeedCount() + '</b></button>'
+      + (stores.length ? '<div class="seg3 bstore">' + [{ id: '', name: 'すべて' }].concat(stores).map(function (x) {
+          return '<button type="button" data-fstore="' + U.esc(x.id) + '"' + (f.store === x.id ? ' class="on"' : '') + '>' + U.esc(x.name) + '</button>';
+        }).join('') + '</div>' : '')
+      + '</div>'
+      + '<div class="bplaces">' + [{ id: '', text: 'すべての買い出し先' }].concat(places, others.length ? [{ id: '-', text: 'その他' }] : []).map(function (p) {
+          return '<button type="button" class="chip' + (f.place === p.id ? ' on' : '') + '" data-fplace="' + U.esc(p.id) + '">' + U.esc(p.text) + '</button>';
+        }).join('') + '</div>';
+    if (!stores.length) {
+      h += '<div class="warnbox">店舗の名前がまだありません（個数は店舗ごとに入れます）。 <button type="button" class="mini" data-act="bstores">店舗を決める</button></div>';
+    }
+    h += '<div class="bacts"><button type="button" class="mini go2" data-act="badd">＋ 買うもの</button>'
+      + '<button type="button" class="mini" data-act="baddplace">＋ 買い出し先</button></div>';
+
+    var secs = places.map(function (p) { return { place: p, items: items.filter(function (it) { return it.to === p.id; }) }; });
+    if (others.length) secs.push({ place: null, items: others });
+    var filtering = f.need || f.store || f.place, shown = 0;
+    secs.forEach(function (sec) {
+      var pid = sec.place ? sec.place.id : '-';
+      if (f.place && f.place !== pid) return;
+      var list = sec.items.filter(function (it) {
+        if (f.store) return wantN(it, f.store) > 0;
+        if (f.need) return wantN(it) > 0;
+        return true;
+      }).sort(byOrder);
+      if (filtering && !list.length) return;
+      var need = sec.items.filter(function (it) { return wantN(it) > 0; }).length;
+      h += '<div class="agroup bhead">' + U.esc(sec.place ? sec.place.text : 'その他')
+        + (sec.place && sec.place.once ? '<span class="oncetag">単発</span>' : '')
+        + '<span>' + (need ? '今回 ' + need + '・' : '') + sec.items.length + '品</span>'
+        + (sec.place ? '<button type="button" class="bmore" data-act="bplace" data-pid="' + U.esc(pid) + '" aria-label="買い出し先を直す">…</button>' : '<i class="bsp"></i>')
+        + '<button type="button" class="bplus" data-act="badd" data-to="' + U.esc(pid) + '" aria-label="ここに買うものを足す">＋</button></div>';
+      h += list.length
+        ? '<div class="card list">' + list.map(function (it) { return buyRow(it, stores, f.store); }).join('') + '</div>'
+        : '<div class="bempty">まだ品物がありません。右の＋で足せます</div>';
+      shown += list.length;
     });
-    groups.sort(function (a, b) { return (a.place ? 0 : 1) - (b.place ? 0 : 1); });
-    var heads = groups.some(function (g) { return g.place; });
-    var h = open.length
-      ? groups.map(function (g) {
-          return (heads ? '<div class="agroup">' + U.esc(g.place || '場所なし') + '<span>' + g.items.length + '件</span></div>' : '')
-            + '<div class="card list">' + g.items.map(function (b) { return buyRow(b, false); }).join('') + '</div>';
-        }).join('')
-      : '<div class="empty art">' + STAR
-        + (done.length ? '<b>買うものは全部そろいました</b>また要るものは、下のチェックを外すと戻ります' : '<b>買うものはありません</b>上の欄に書いて足してください') + '</div>';
-    if (done.length) {
-      h += '<button type="button" class="donehead" data-act="showbought">' + (showBought ? '▾' : '▸') + ' 買ったもの ' + done.length + '件</button>';
-      if (showBought) {
-        h += '<div class="card list">' + done.map(function (b) { return buyRow(b, true); }).join('') + '</div>'
-          + '<div class="buyfoot"><button type="button" class="mini danger" data-act="clearbought">買ったものを全部消す</button></div>';
-      }
+    if (filtering && !shown) {
+      h += '<div class="empty art">' + STAR + '<b>当てはまるものはありません</b>絞り込みを外すと、全部の品物が出ます</div>';
+    } else if (!secs.length) {
+      h += '<div class="empty art">' + STAR + '<b>買い出し先がありません</b>上の「＋ 買い出し先」から足してください</div>';
     }
-    document.getElementById('buyList').innerHTML = h;
-    // 前に買ったものの名前と、使った買う場所は、打ちはじめると候補に出る
-    document.getElementById('buyNames').innerHTML = done.map(function (b) { return '<option value="' + U.esc(b.text) + '">'; }).join('');
-    var places = [];
-    all.forEach(function (b) { var p = (b.place || '').trim(); if (p && places.indexOf(p) < 0) places.push(p); });
-    document.getElementById('buyPlaces').innerHTML = places.map(function (p) { return '<option value="' + U.esc(p) + '">'; }).join('');
+    if (stores.length) h += '<div class="buyfoot"><button type="button" class="linkbtn" data-act="bstores">店舗の名前を直す</button></div>';
+    document.getElementById('buyBody').innerHTML = h;
   }
 
-  function addBuy() {
-    var n = document.getElementById('buyInput'), c = document.getElementById('buyCount'), p = document.getElementById('buyPlace');
-    var text = n.value.trim(), count = buyCount(c.value), place = p.value.trim(), now = Date.now();
-    if (!text) { n.focus(); return; }
-    if (!confirmWork(text + ' ' + place, BUYSP)) return;
-    var all = Store.list(BUYSP, 'buy');
-    var sameName = function (b) { return buyKey(b.text) === buyKey(text); };
-    // まだ買っていないもので、名前も場所も同じもの：増やさない。個数がちがえば直す
-    var open = all.filter(function (b) { return !b.done && sameName(b) && buyKey(b.place) === buyKey(place); })[0];
-    // 前に買ったもの（同じ場所を先に探す）：同じ1件をリストに戻す
-    var done = all.filter(function (b) { return b.done && sameName(b) && buyKey(b.place) === buyKey(place); })[0]
-      || all.filter(function (b) { return b.done && sameName(b); })[0];
-    if (open) {
-      if (open.count !== count) { open.count = count; delete open.qty; Store.put(BUYSP, 'buy', open); toast('もうリストにあります（個数を' + count + '個に直しました）'); }
-      else toast('もうリストにあります');
-    } else if (done) {
-      done.done = false; done.doneAt = 0; done.need = now; done.count = count; done.place = place; delete done.qty;
-      Store.put(BUYSP, 'buy', done);
-    } else {
-      Store.put(BUYSP, 'buy', { text: text, count: count, place: place, note: '', done: false, need: now });
+  /** 買った：個数を消す。単発の品物は消し、空になった単発の買い出し先も消す */
+  function buyBought(id) {
+    var it = Store.get(BUYSP, 'buy', id);
+    if (!it) return;
+    var before = wantOf(it), lastBefore = it.lastAt || 0, placeGone = '';
+    if (it.once) Store.remove(BUYSP, 'buy', id);
+    else { it.want = {}; it.lastAt = Date.now(); Store.put(BUYSP, 'buy', it); }
+    var p = it.to ? Store.get(BUYSP, 'buy', it.to) : null;
+    if (p && !p.deleted && p.once && !buyItems().some(function (x) { return x.to === p.id; })) {
+      Store.remove(BUYSP, 'buy', p.id); placeGone = p.id;
     }
-    n.value = ''; c.value = 1;                 // 買う場所は残す（同じ店の分を続けて足せるように）
     renderAll();
-    n.focus();
+    toast('買いました', function () {
+      if (placeGone) { var q = Store.get(BUYSP, 'buy', placeGone); if (q) { delete q.deleted; Store.put(BUYSP, 'buy', q); } }
+      var cur = Store.get(BUYSP, 'buy', id);
+      if (!cur) return;
+      delete cur.deleted; cur.want = before; cur.lastAt = lastBefore;
+      Store.put(BUYSP, 'buy', cur);
+      renderAll();
+    });
   }
 
-  /** −／＋ のボタンで、となりの個数の欄を1つずつ動かす */
-  function stepCount(btn) {
-    var box = btn.closest('.stepper'), input = box && box.querySelector('input');
-    if (input) input.value = buyCount(buyCount(input.value) + Number(btn.dataset.step));
+  function onceSeg(id, on) {
+    return '<div class="seg3 bonce" id="' + id + '">'
+      + '<button type="button" data-once="0"' + (on ? '' : ' class="on"') + '>いつもの</button>'
+      + '<button type="button" data-once="1"' + (on ? ' class="on"' : '') + '>今回だけ（単発）</button></div>';
   }
-
-  function toggleBuy(id) {
-    var b = Store.get(BUYSP, 'buy', id);
-    if (!b) return;
-    b.done = !b.done;
-    b.doneAt = b.done ? Date.now() : 0;
-    if (!b.done) b.need = Date.now();             // また買うものは、リストの一番下に入る
-    Store.put(BUYSP, 'buy', b);
-    renderAll();
-    if (b.done) {
-      toast('買いました', function () {
-        var cur = Store.get(BUYSP, 'buy', id);
-        if (!cur) return;
-        cur.done = false; cur.doneAt = 0;
-        Store.put(BUYSP, 'buy', cur);
-        renderAll();
-      });
-    }
+  function onceWire(m, id) {
+    m.querySelectorAll('#' + id + ' [data-once]').forEach(function (b) {
+      b.onclick = function () { m.querySelectorAll('#' + id + ' [data-once]').forEach(function (x) { x.classList.toggle('on', x === b); }); };
+    });
   }
-
-  function editBuy(id) {
-    var b = Store.get(BUYSP, 'buy', id);
-    if (!b) return;
-    // 前の形（数量を文字で持っていた分）は、文字のままメモの頭に残してから、個数に切りかえる
-    var legacy = !b.count && b.qty && !/^\s*\d+\s*$/.test(b.qty) ? b.qty : '';
-    modal('<h2>買い出し</h2>'
-      + '<div class="f"><label for="y-text">買うもの</label><input type="text" id="y-text" maxlength="80" value="' + U.esc(b.text) + '"></div>'
-      + '<div class="f"><label>個数</label><div class="stepper">'
+  function onceOf(m, id) { var on = m.querySelector('#' + id + ' .on'); return !!(on && on.dataset.once === '1'); }
+  function stepperHtml(store, n) {
+    return '<div class="stepper" data-store="' + U.esc(store) + '">'
       + '<button type="button" data-step="-1" aria-label="1つ減らす">−</button>'
-      + '<input type="number" id="y-count" inputmode="numeric" min="1" max="999" value="' + buyCount(b.count || b.qty) + '" aria-label="個数">'
-      + '<button type="button" data-step="1" aria-label="1つ増やす">＋</button></div></div>'
-      + '<div class="f"><label for="y-place">買う場所（空でもよい）</label><input type="text" id="y-place" maxlength="40" list="buyPlaces" value="' + U.esc(b.place || '') + '"></div>'
-      + '<div class="f"><label for="y-note">メモ（売り場・銘柄など。空でもよい）</label><textarea id="y-note" rows="3" maxlength="1000">'
-      + U.esc((legacy ? legacy + '\n' : '') + (b.note || '')) + '</textarea></div>'
-      + '<div class="acts"><button type="button" class="del" id="y-del">消す</button>'
-      + '<button type="button" id="y-cancel">やめる</button><button type="button" class="go" id="y-ok">直す</button></div>',
+      + '<input type="number" inputmode="numeric" min="0" max="999" value="' + n + '" aria-label="個数">'
+      + '<button type="button" data-step="1" aria-label="1つ増やす">＋</button></div>';
+  }
+
+  /** 買うものを足す・直す。id が無ければ足す（toPre はその買い出し先に足すとき） */
+  function buyEdit(id, toPre) {
+    var it = id ? Store.get(BUYSP, 'buy', id) : null;
+    if (id && !it) return;
+    var stores = buyStores(), places = buyPlaces(), want = it ? wantOf(it) : {};
+    var to = it ? (it.to || '') : (toPre && toPre !== '-' ? toPre : '');
+    if (to && !places.some(function (p) { return p.id === to; })) to = '';
+    modal('<h2>' + (it ? '買うもの' : '買うものを足す') + '</h2>'
+      + '<div class="f"><label for="w-text">買うもの</label><input type="text" id="w-text" maxlength="80" value="' + U.esc(it ? it.text : '') + '"></div>'
+      + '<div class="bsec">今回買う個数<span>（0なら買わない）</span></div>'
+      + (stores.length
+        ? stores.map(function (x) {
+            return '<div class="bwrow"><span class="bwname">' + U.esc(x.name) + '</span>' + stepperHtml(x.id, want[x.id] || 0) + '</div>';
+          }).join('')
+        : '<div class="hint">店舗の名前がまだありません。一覧の「店舗を決める」から決めると、ここで個数を入れられます。</div>')
+      + '<div class="bsec">品物</div>'
+      + '<div class="f"><label for="w-to">買い出し先</label><select id="w-to">'
+      + places.map(function (p) { return '<option value="' + U.esc(p.id) + '"' + (p.id === to ? ' selected' : '') + '>' + U.esc(p.text) + (p.once ? '（単発）' : '') + '</option>'; }).join('')
+      + '<option value=""' + (to ? '' : ' selected') + '>その他（決めていない）</option>'
+      + '<option value="+">＋ 新しい買い出し先…</option></select></div>'
+      + '<div class="f" id="w-np" hidden><label for="w-npname">新しい買い出し先の名前</label><input type="text" id="w-npname" maxlength="40">'
+      + '<div style="margin-top:8px">' + onceSeg('w-nponce', false) + '</div></div>'
+      + '<div class="f"><label>種類</label>' + onceSeg('w-once', it ? !!it.once : false)
+      + '<div class="hint" style="margin-top:6px">「今回だけ」は、買ったら一覧から消えます</div></div>'
+      + '<div class="f"><label for="w-note">メモ（売り場・銘柄など。空でもよい）</label><textarea id="w-note" rows="2" maxlength="1000">' + U.esc(it ? it.note || '' : '') + '</textarea></div>'
+      + (it && it.lastAt ? '<div class="hint">前に買った日：' + U.esc(U.md(U.iso(new Date(it.lastAt)))) + '</div>' : '')
+      + '<div class="acts">' + (it ? '<button type="button" class="del" id="w-del">消す</button>' : '')
+      + '<button type="button" id="w-cancel">やめる</button><button type="button" class="go" id="w-ok">' + (it ? '決める' : '足す') + '</button></div>',
       function (m) {
-        autoGrow(m.querySelector('#y-note'));
-        m.querySelectorAll('[data-step]').forEach(function (btn) { btn.onclick = function () { stepCount(btn); }; });
-        m.querySelector('#y-cancel').onclick = closeModal;
-        m.querySelector('#y-del').onclick = function () {
+        autoGrow(m.querySelector('#w-note'));
+        m.querySelectorAll('[data-step]').forEach(function (b) { b.onclick = function () { stepCount(b); }; });
+        onceWire(m, 'w-once'); onceWire(m, 'w-nponce');
+        m.querySelector('#w-to').onchange = function () { m.querySelector('#w-np').hidden = this.value !== '+'; };
+        m.querySelector('#w-cancel').onclick = closeModal;
+        if (it) m.querySelector('#w-del').onclick = function () {
           Store.remove(BUYSP, 'buy', id);
           closeModal(); renderAll();
           toast('消しました', function () {
@@ -1165,34 +1221,101 @@
             renderAll();
           });
         };
-        m.querySelector('#y-ok').onclick = function () {
-          var text = m.querySelector('#y-text').value.trim(), place = m.querySelector('#y-place').value.trim(), note = m.querySelector('#y-note').value.trim();
-          if (!text) { toast('買うものが空です'); return; }
-          if (!confirmWork(text + ' ' + place + ' ' + note, BUYSP)) return;
-          b.text = text; b.count = buyCount(m.querySelector('#y-count').value); b.place = place; b.note = note;
-          delete b.qty;
-          Store.put(BUYSP, 'buy', b);
+        m.querySelector('#w-ok').onclick = function () {
+          var text = m.querySelector('#w-text').value.trim(), note = m.querySelector('#w-note').value.trim();
+          var dest = m.querySelector('#w-to').value, npName = m.querySelector('#w-npname').value.trim();
+          if (!text) { toast('買うものの名前を入れてください'); return; }
+          if (dest === '+' && !npName) { toast('新しい買い出し先の名前を入れてください'); return; }
+          if (!confirmWork(text + ' ' + note + ' ' + npName, BUYSP)) return;
+          var w = {};
+          m.querySelectorAll('.stepper[data-store]').forEach(function (box) {
+            var n = buyCount(box.querySelector('input').value, 0);
+            if (n > 0) w[box.dataset.store] = n;
+          });
+          if (dest === '+') {
+            var np = Store.put(BUYSP, 'buy', { type: 'place', text: npName, once: onceOf(m, 'w-nponce'), order: Date.now() });
+            dest = np.id;
+          }
+          var once = onceOf(m, 'w-once');
+          if (!it) {
+            // 同じ買い出し先に同じ名前があれば、増やさずにそちらへ個数を入れる
+            var same = buyItems().filter(function (x) { return (x.to || '') === dest && buyKey(x.text) === buyKey(text); })[0];
+            if (same) {
+              Object.keys(w).forEach(function (k) { same.want = same.want || {}; same.want[k] = w[k]; });
+              if (note) same.note = note;
+              Store.put(BUYSP, 'buy', same);
+              closeModal(); renderAll(); toast('もう一覧にありました（個数を入れました）');
+              return;
+            }
+            Store.put(BUYSP, 'buy', { type: 'item', text: text, to: dest, once: once, want: w, note: note, order: Date.now() });
+          } else {
+            it.text = text; it.to = dest; it.once = once; it.want = w; it.note = note;
+            Store.put(BUYSP, 'buy', it);
+          }
           closeModal(); renderAll();
         };
+        if (!it) setTimeout(function () { var el = m.querySelector('#w-text'); if (el) el.focus(); }, 50);
       });
   }
 
-  function clearBought() {
-    var done = Store.list(BUYSP, 'buy').filter(function (b) { return b.done; });
-    if (!done.length) return;
-    if (!global.confirm('買ったもの ' + done.length + '件を、リストから消します。\n（候補にも出なくなります）\n\nよろしいですか？')) return;
-    var ids = done.map(function (b) { return b.id; });
-    ids.forEach(function (id) { Store.remove(BUYSP, 'buy', id); });
-    renderAll();
-    toast(ids.length + '件消しました', function () {
-      ids.forEach(function (id) {
-        var cur = Store.get(BUYSP, 'buy', id);
-        if (!cur) return;
-        delete cur.deleted;
-        Store.put(BUYSP, 'buy', cur);
+  /** 買い出し先を足す・直す・消す */
+  function placeEdit(id) {
+    var p = id ? Store.get(BUYSP, 'buy', id) : null;
+    if (id && !p) return;
+    var inside = p ? buyItems().filter(function (x) { return x.to === p.id; }) : [];
+    modal('<h2>' + (p ? '買い出し先' : '買い出し先を足す') + '</h2>'
+      + '<div class="f"><label for="pl-text">名前</label><input type="text" id="pl-text" maxlength="40" value="' + U.esc(p ? p.text : '') + '"></div>'
+      + '<div class="f"><label>種類</label>' + onceSeg('pl-once', p ? !!p.once : false)
+      + '<div class="hint" style="margin-top:6px">「今回だけ」の買い出し先は、中の品物を全部買うと消えます</div></div>'
+      + '<div class="acts">' + (p ? '<button type="button" class="del" id="pl-del">消す</button>' : '')
+      + '<button type="button" id="pl-cancel">やめる</button><button type="button" class="go" id="pl-ok">' + (p ? '決める' : '足す') + '</button></div>',
+      function (m) {
+        onceWire(m, 'pl-once');
+        m.querySelector('#pl-cancel').onclick = closeModal;
+        if (p) m.querySelector('#pl-del').onclick = function () {
+          if (!global.confirm('「' + p.text + '」を消します。' + (inside.length ? '\n中の品物 ' + inside.length + '件も一緒に消えます。' : '') + '\n\nよろしいですか？')) return;
+          inside.forEach(function (x) { Store.remove(BUYSP, 'buy', x.id); });
+          Store.remove(BUYSP, 'buy', p.id);
+          if (buyF().place === p.id) buyF().place = '';
+          closeModal(); renderAll(); toast('消しました');
+        };
+        m.querySelector('#pl-ok').onclick = function () {
+          var text = m.querySelector('#pl-text').value.trim();
+          if (!text) { toast('名前を入れてください'); return; }
+          if (!confirmWork(text, BUYSP)) return;
+          if (p) { p.text = text; p.once = onceOf(m, 'pl-once'); Store.put(BUYSP, 'buy', p); }
+          else Store.put(BUYSP, 'buy', { type: 'place', text: text, once: onceOf(m, 'pl-once'), order: Date.now() });
+          closeModal(); renderAll();
+        };
+        if (!p) setTimeout(function () { var el = m.querySelector('#pl-text'); if (el) el.focus(); }, 50);
       });
-      renderAll();
-    });
+  }
+
+  /** 店舗の名前を決める・直す。名前は記録にだけ持つ（コードには書かない）。個数は店舗の id で持つので、名前を直しても個数は残る */
+  function storesEdit() {
+    var c = buyConf(), stores = buyStores();
+    var rows = stores.concat([{ id: '', name: '' }, { id: '', name: '' }]).slice(0, Math.max(stores.length + 1, 2));
+    modal('<h2>店舗の名前</h2>'
+      + '<div class="hint">買うものの個数は、ここの店舗ごとに入れます。空にした店舗は外れます。</div>'
+      + rows.map(function (x, i) {
+          return '<div class="f"><input type="text" class="st-name" data-id="' + U.esc(x.id) + '" maxlength="20" value="' + U.esc(x.name) + '" placeholder="店舗' + (i + 1) + 'の名前"></div>';
+        }).join('')
+      + '<div class="acts"><button type="button" id="st-cancel">やめる</button><button type="button" class="go" id="st-ok">決める</button></div>',
+      function (m) {
+        m.querySelector('#st-cancel').onclick = closeModal;
+        m.querySelector('#st-ok').onclick = function () {
+          var list = [];
+          m.querySelectorAll('.st-name').forEach(function (el) {
+            var name = el.value.trim();
+            if (name) list.push({ id: el.dataset.id || 's' + Date.now().toString(36) + list.length, name: name });
+          });
+          if (!list.length) { toast('店舗を1つ以上入れてください'); return; }
+          var rec = c || { id: BUY_CONF, type: 'conf', text: '買い出しの店舗', createdAt: Date.now() };
+          rec.stores = list;
+          Store.put(BUYSP, 'buy', rec);
+          closeModal(); renderAll();
+        };
+      });
   }
 
   /* ================= 自作アプリ（個人の側だけ・ロックつき。2026-10-11 ko-dai さんの願い） =================
@@ -1886,7 +2009,7 @@
       h += '<div class="setrow"><div><div class="k">' + U.esc(label(sp)) + '</div>'
         + '<div class="d">タスク ' + open + '件（済み ' + (tasks.length - open) + '件）・メモ ' + Store.list(sp, 'memo').length + '件'
         + (devN ? '・部署の残りの写し ' + devN + '件' : '')
-        + (sp === BUYSP && Store.list(sp, 'buy').length ? '・買い出し ' + Store.list(sp, 'buy').filter(function (b) { return !b.done; }).length + '件' : '')
+        + (sp === BUYSP && buyItems().length ? '・買い出しの品物 ' + buyItems().length + '件（今回 ' + buyNeedCount() + '件）' : '')
         + '・' + (ss.kind === 'off' ? '端末の中だけ' : ss.kind === 'error' ? '送れていません' : ss.pending ? '未送信 ' + ss.pending + '件' : '同期ずみ')
         + '</div></div></div>';
     });
@@ -2189,26 +2312,25 @@
     });
 
     /* 買い出し */
-    document.getElementById('buyForm').addEventListener('submit', function (e) { e.preventDefault(); addBuy(); });
-    document.getElementById('buyForm').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-step]');
-      if (b) stepCount(b);
-    });
-    // 個数の欄を空にしたまま離れたら、1に戻す
-    document.getElementById('buyCount').addEventListener('blur', function (e) { e.target.value = buyCount(e.target.value); });
-    document.getElementById('buyList').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-act]');
+    document.getElementById('buyBody').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act],[data-fneed],[data-fstore],[data-fplace]');
       if (!b) return;
-      if (b.dataset.act === 'showbought') { showBought = !showBought; renderBuy(); return; }
-      if (b.dataset.act === 'clearbought') { clearBought(); return; }
+      var f = buyF();
+      if (b.dataset.fneed) { f.need = !f.need; Store.saveUi(); renderBuy(); return; }
+      if (b.dataset.fstore != null) { f.store = b.dataset.fstore; Store.saveUi(); renderBuy(); return; }
+      if (b.dataset.fplace != null) { f.place = b.dataset.fplace; Store.saveUi(); renderBuy(); return; }
+      var act = b.dataset.act;
+      if (act === 'badd') { buyEdit('', b.dataset.to || (f.place && f.place !== '-' ? f.place : '')); return; }
+      if (act === 'baddplace') { placeEdit(''); return; }
+      if (act === 'bplace') { placeEdit(b.dataset.pid); return; }
+      if (act === 'bstores') { storesEdit(); return; }
       var row = b.closest('.trow');
       if (!row) return;
-      if (b.dataset.act === 'bedit') { editBuy(row.dataset.id); return; }
-      if (b.dataset.act === 'btoggle' && !b.classList.contains('pop')) {
-        // 買ったときだけ、金の丸と光を見せてから入れ替える（戻すときはすぐ）
-        var cur = Store.get(BUYSP, 'buy', row.dataset.id);
-        if (cur && !cur.done) { b.classList.add('pop'); setTimeout(function () { toggleBuy(row.dataset.id); }, 380); }
-        else toggleBuy(row.dataset.id);
+      if (act === 'bopen') { buyEdit(row.dataset.id); return; }
+      if (act === 'bbought' && !b.classList.contains('pop')) {
+        // 買ったときは、金の印と光を見せてから入れ替える
+        b.classList.add('pop');
+        setTimeout(function () { buyBought(row.dataset.id); }, 380);
       }
     });
 
