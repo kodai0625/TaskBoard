@@ -117,6 +117,9 @@
     pin: function () { return (Store.conn().pin || '').trim(); },
     enabled: function () { return !!Sync.url() && !!Sync.pin(); },
 
+    /** ほかの受け口を読む（Diem の休みを読むとき。崩れた返事は同じように送り直す） */
+    call: function (u, payload) { return post(String(u || '').trim(), payload); },
+
     /** つながるか確かめるだけ（設定で入れた直後に使う） */
     test: function (u, p) {
       return post(u.trim(), { pin: (p || '').trim(), action: 'ping' });

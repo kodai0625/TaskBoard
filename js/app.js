@@ -312,7 +312,7 @@
     paintSync();
     paintCounts();
     if (view === 'task') renderTasks();
-    if (view === 'plan') renderPlan();
+    if (view === 'plan') { renderPlan(); diemImport(false); }
     if (view === 'memo') renderMemos();
     if (view === 'buy') renderBuy();
     if (view === 'apps') renderApps();
@@ -739,6 +739,7 @@
           m.querySelectorAll('#e-days [data-day].on').forEach(function (b) { days.push(+b.dataset.day); });
           if (rep === 'weekly' && !days.length) { toast('曜日を選んでください'); return; }
           var time = m.querySelector('#e-time').value || '';
+          var wasTime = t.time || '', wasDo = t.doOn || '';
           t.title = title; t.note = note; t.prio = prio;
           t.time = time; t.dur = time ? +m.querySelector('#e-dur').value : 0;
           if (rep) {
@@ -753,6 +754,8 @@
             t.repeat = ''; t.days = []; t.due = due.value || ''; t.doOn = doIn.value || '';
             if (t.time && !t.doOn) t.doOn = U.today();                          // 時刻だけなら今日やる
           }
+          // 自分で時刻・やる日を変えたら「自動」の印を外す（組み直しても動かさない）
+          if (t.auto && ((t.time || '') !== wasTime || (t.doOn || '') !== wasDo)) delete t.auto;
           Store.put(sp, 'task', t);
           closeModal(); renderAll();
         };
@@ -774,13 +777,20 @@
   var planDate = '';
   var HOUR = 52;                                  // 1時間の高さ（px）
 
+  /** その日に出す時刻。習慣は、自分の時刻が無ければ「自動で組む」が入れたその日だけの時刻（autoAt） */
+  function timeOn(t, iso) { return t.time || (isHabit(t) && t.autoAt && t.autoAt[iso]) || ''; }
+  /** 「自動で組む」が入れた時刻か（自分で決めた時刻は false。組み直すとき、自動のものだけ動かす） */
+  function autoOn(t, iso) { return isHabit(t) ? !t.time && !!(t.autoAt && t.autoAt[iso]) : !!t.time && t.auto === iso; }
+
   function planItems(iso) {
     var out = [];
     Store.SPACES.forEach(function (sp) {
       Store.list(sp, 'task').forEach(function (t) {
         if (isDev(t)) return;
-        if (isHabit(t)) { if (onDay(t, iso)) out.push({ sp: sp, t: t, habit: true, done: habitDone(t, iso) }); }
-        else if (planDay(t) === iso) out.push({ sp: sp, t: t, habit: false, done: !!t.done });
+        var x = null;
+        if (isHabit(t)) { if (onDay(t, iso)) x = { sp: sp, t: t, habit: true, done: habitDone(t, iso) }; }
+        else if (planDay(t) === iso) x = { sp: sp, t: t, habit: false, done: !!t.done };
+        if (x) { x.time = timeOn(t, iso); x.auto = autoOn(t, iso); out.push(x); }
       });
     });
     return out;
@@ -808,26 +818,29 @@
   }
 
   function planCheck(x) {
-    return '<button type="button" class="ck' + (x.done ? '' : '') + '" data-act="ptoggle" aria-label="' + (x.done ? '済みを取り消す' : '済みにする') + '">'
+    return '<button type="button" class="ck" data-act="ptoggle" aria-label="' + (x.done ? '済みを取り消す' : '済みにする') + '">'
       + '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       + '</button>';
   }
 
-  /* ---------- 自動で組む（2026-10-23 ko-dai さんの願い） ----------
-     その日の仕事の時間と予定から、何時に起きて何時に寝るか、時刻の無いタスクをいつやるかの「案」を作る。
-     ★案は見せるだけ。「この案で決める」を押したときだけ、タスクに時刻とやる日を書く（習慣の時刻は変えない）
-       ・仕事の時間は、その日ごとに入れる（ko-dai さんの決定）。会社の側の記録（day-w-日付）として同期する。
-         記録は memo の入れ物に同居（src:'day'）。メモの一覧にも Obsidian にも出さない
-       ・起きる：「いつもの起きる時刻」と「前の晩に寝た時刻＋睡眠」の遅いほう。ただし、その日の最初の予定（仕事を含む）の
-         「支度の時間」前までには起きる（間に合わないと、睡眠が足りないと出す）
-       ・寝る：次の日の起きる時刻から睡眠の時間を引いた時刻。ただし、その日の最後の予定の後の「寝る前のゆとり」より前にはしない
-       ・入れるもの：やる日・期限がその日（と過ぎたもの）・その日の習慣が先。時間が余れば、期限が3日以内のものと重要度 高のもの
-         （やる日が先の日に決まっているものは入れない）。重要度 → 期限の近さの順に、空いている一番早い時間へ
-       ・会社のタスクは仕事の時間の中の空きへ、個人のタスクは仕事の前後と休みの日へ（ko-dai さんの決定）
-       ・夜中の0時を越える時刻には入れない（時刻はその日の中だけで持つため）
-       ・組み方の数（睡眠7時間など）は、この端末の画面の覚え（tb.ui の planConf） */
-  var planDraft = null;              // { iso, r }：見せている案
+  /* ---------- 自動で組む（2026-10-23 ko-dai さんの願い。同じ日に作り直し） ----------
+     その日の仕事（職場・時間・通勤）と予定から、何時に起きて何時に寝るかと、時刻の無いタスクをいつやるかを組んで、
+     ★そのまま書き込む（自分で直せる）。書いた時刻には「自動」の印（タスクは auto＝日付、習慣は autoAt[日付]）を付ける。
+       自分で時刻ややる日を直したタスクは印が外れ、それ以後は組み直しても動かさない
+     ・いつ組むか：その日の仕事を入れた・直したとき／「退勤」を押したとき（今から先だけ）／「組み直す」を押したとき／
+       Diem の休みを取り込んだとき。今日を組むときは、今より前には入れない
+     ・職場・時間の決まり・通勤（片道）は、会社の側の記録 day-conf に持つ（★職場の名前はコードに書かない。公開しているコードから
+       勤め先が分からないように）。その日の仕事は day-w-日付（{place, shift, start, end, clockOut, off, from}）
+     ・起きる：「いつもの起きる時刻」と「前の晩に帰った時刻＋ゆとり＋睡眠」の遅いほう。ただし、その日の最初の予定
+       （仕事なら、家を出る時刻＝出勤−通勤）の「動き出すまで」前までには起きる
+     ・寝る：次の日の起きる時刻−睡眠。その日の最後の予定（仕事なら、家に着く時刻＝退勤＋通勤）＋ゆとりより前にはしない
+     ・会社のタスクは仕事の時間の中、個人のタスクは仕事と通勤の前後と休みの日へ（ko-dai さんの決定）
+     ・入れるもの：やる日・期限がその日のものと、その日の習慣。今日を組むときは、過ぎたものと、空きに期限3日以内・重要度 高も
+       （先の日を組むときに、ほかの日のものを連れてこないため）。やる日が先の日に決まっているものは前倒ししない
+     ・夜中の0時を越える時刻には入れない（時刻はその日の中だけで持つため）
+     ・組み方の数（睡眠7時間など）は、この端末の画面の覚え（tb.ui の planConf） */
   var PLAN_DEF = { sleepH: 7, prepMin: 60, windMin: 30, gapMin: 10, wake: '07:00' };
+  var planRuns = {};                 // { 日付: { at, placed, left } } 最後に組んだ結果（この画面を開いている間だけ）
 
   function planConf() {
     var u = Store.ui(), c = u.planConf || {};
@@ -839,34 +852,67 @@
     return out;
   }
   function shiftIso(iso, n) { var d = U.parse(iso); d.setDate(d.getDate() + n); return U.iso(d); }
+  function nowMin() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+
+  /* 職場の決まり（会社の側の day-conf）。{ places:[{ id, name, commute:分, shifts:[{ id, name, start, end, startByDow, endByDow }] }] } */
+  function dayConf() { var c = Store.get('work', 'day', 'day-conf'); return c && !c.deleted ? c : null; }
+  function workplaces() { var c = dayConf(); return ((c && c.places) || []).filter(function (p) { return p && p.id && p.name; }); }
+  function placeOf(id) { return workplaces().filter(function (p) { return p.id === id; })[0] || null; }
+  function shiftsOf(p) { return ((p && p.shifts) || []).filter(function (s) { return s && s.start && s.end; }); }
+  /** 決まりの時間（曜日で終わりが変わるものも。0＝日曜） */
+  function ruleTimes(p, shiftId, iso) {
+    var list = shiftsOf(p), sh = list.filter(function (s) { return s.id === shiftId; })[0] || list[0];
+    if (!sh) return null;
+    var dow = String(U.parse(iso).getDay());
+    return { shift: sh.id, start: (sh.startByDow && sh.startByDow[dow]) || sh.start, end: (sh.endByDow && sh.endByDow[dow]) || sh.end };
+  }
+
   function workOf(iso) { var r = Store.get('work', 'day', 'day-w-' + iso); return r && !r.deleted ? r : null; }
-  /** 仕事の時間（分。終わりが始まりより前なら次の日まで＝1440を越える）。休み・未入力は null */
+  /** 仕事の時間（分。0時を越える分は1440を足す）と通勤（片道・分）。休み・未入力は null。退勤を押した日は、退勤の時刻で終わる */
   function workSpan(iso) {
     var w = workOf(iso);
     if (!w || w.off || !w.start || !w.end) return null;
-    var s = toMin(w.start), e = toMin(w.end);
+    var s = toMin(w.start), e = toMin(w.clockOut || w.end);
     if (e <= s) e += 1440;
-    return { s: s, e: e };
+    var p = w.place ? placeOf(w.place) : null;
+    return { s: s, e: e, com: Math.max(0, Number(p && p.commute) || 0), out: !!w.clockOut, w: w, p: p };
   }
-  /** その日の動かせない予定（時刻のあるタスク・習慣と、仕事）。済みのものも時間はふさがっているとみなす */
-  function fixedOf(iso) {
+  function workName(w) {
+    var p = w && w.place ? placeOf(w.place) : null, sh = p ? shiftsOf(p).filter(function (s) { return s.id === w.shift; })[0] : null;
+    return p ? p.name + (sh && sh.name && shiftsOf(p).length > 1 ? ' ' + sh.name : '') : '仕事';
+  }
+
+  /** その日の動かせない予定。仕事は、家を出てから帰るまで（通勤をふくむ）。
+      skipAuto を渡すと、その日の「自動」のものは動かせるものとして外す（組み直すとき） */
+  function fixedOf(iso, skipAuto) {
     var out = [];
     planItems(iso).forEach(function (x) {
-      if (x.t.time) { var s = toMin(x.t.time); out.push({ s: s, e: s + durOf(x.t) }); }
+      if (!x.time || (skipAuto && x.auto)) return;
+      var s = toMin(x.time);
+      out.push({ s: s, e: s + durOf(x.t) });
     });
     var w = workSpan(iso);
-    if (w) out.push(w);
+    if (w) out.push({ s: w.s - w.com, e: w.e + w.com });
     return out.sort(function (a, b) { return a.s - b.s; });
   }
   function lastEnd(fixed) { return fixed.reduce(function (m, f) { return Math.max(m, f.e); }, -1); }
   /** 起きる時刻（その日の0時からの分） */
   function wakeAt(iso, c) {
-    var f = fixedOf(iso), prev = fixedOf(shiftIso(iso, -1));
+    var f = fixedOf(iso), pe = lastEnd(fixedOf(shiftIso(iso, -1)));
     var w = toMin(c.wake);
-    var pe = lastEnd(prev);
     if (pe >= 0) w = Math.max(w, pe + c.windMin + c.sleepH * 60 - 1440);   // 前の晩が遅ければ、寝坊してよい
-    if (f.length) w = Math.min(w, f[0].s - c.prepMin);                        // 最初の予定には間に合わせる
+    if (f.length) w = Math.min(w, f[0].s - c.prepMin);                        // 最初の予定（家を出る時刻）には間に合わせる
     return Math.max(0, w);
+  }
+  function sleepOf(iso) {
+    var c = planConf(), fixed = fixedOf(iso);
+    var wake = wakeAt(iso, c), nextWake = wakeAt(shiftIso(iso, 1), c) + 1440, le = lastEnd(fixed);
+    var bed = nextWake - c.sleepH * 60, short = false;
+    if (le >= 0 && bed < le + c.windMin) { bed = le + c.windMin; short = true; }
+    if (bed < wake + c.prepMin + 60) bed = wake + c.prepMin + 60;
+    if (fixed.length && wake > fixed[0].s - c.prepMin) short = true;
+    if (nextWake - bed < c.sleepH * 60) short = true;
+    return { wake: wake, bed: bed, sleep: nextWake - bed, short: short };
   }
 
   function snap(m) { return Math.ceil(m / 5) * 5; }
@@ -889,53 +935,52 @@
     return out.filter(function (w) { return w.e - w.s >= 5; });
   }
 
-  /** 案を作る。返すのは { wake, bed, sleep, short, work, workSet, placed:[{sp,t,habit,s,e}], left:[{sp,t,why}] } */
-  function autoPlan(iso) {
-    var c = planConf(), fixed = fixedOf(iso), work = workSpan(iso);
-    var wake = wakeAt(iso, c), nextWake = wakeAt(shiftIso(iso, 1), c) + 1440;
-    var le = lastEnd(fixed);
-    var bed = nextWake - c.sleepH * 60, short = false;
-    if (le >= 0 && bed < le + c.windMin) { bed = le + c.windMin; short = true; }
-    if (bed < wake + c.prepMin + 60) bed = wake + c.prepMin + 60;
-    var first = fixed.length ? fixed[0].s : null;
-    if (first != null && wake > first - c.prepMin) short = true;
-    var sleep = nextWake - bed;
-    if (sleep < c.sleepH * 60) short = true;
-
-    // 空いている時間：起きて支度したあと〜寝る前のゆとりの前（0時まで）から、予定（前後のすき間つき）を切り取る
-    var dayWin = [{ s: snap(wake + c.prepMin), e: Math.min(1440, bed - c.windMin) }];
-    var busyTasks = [];
+  /** 組む（書かない）。from は入れてよい一番早い時刻（分）。返すのは { placed:[{sp,t,habit,s,e}], left:[{sp,t,why}], freed:[{sp,t,habit}] } */
+  function autoPlan(iso, from) {
+    var c = planConf(), work = workSpan(iso), sl = sleepOf(iso), today = U.today();
+    from = Math.max(from || 0, iso === today ? nowMin() : 0);
+    var dayWin = [{ s: snap(Math.max(sl.wake + c.prepMin, from)), e: Math.min(1440, sl.bed - c.windMin) }];
+    var busy = [];
     planItems(iso).forEach(function (x) {
-      if (x.t.time) { var s = toMin(x.t.time); busyTasks.push({ s: s - c.gapMin, e: s + durOf(x.t) + c.gapMin }); }
+      if (!x.time || x.auto) return;                                   // 自動のものは組み直すので、ふさがりにしない
+      var s = toMin(x.time);
+      busy.push({ s: s - c.gapMin, e: s + durOf(x.t) + c.gapMin });
     });
-    // 個人のタスクは、仕事の前後にもすき間をあける（行き帰り・切りかえ）
-    var own = cut(cut(dayWin, busyTasks), work ? [{ s: work.s - c.gapMin, e: work.e + c.gapMin }] : []);
-    var inWork = work ? cut(cut(dayWin, busyTasks), [{ s: -1e9, e: work.s }, { s: work.e, e: 1e9 }]) : [];
+    var base = cut(dayWin, busy);
+    var own = cut(base, work ? [{ s: work.s - work.com - c.gapMin, e: work.e + work.com + c.gapMin }] : []);
+    var inWork = work ? cut(base, [{ s: -1e9, e: work.s }, { s: work.e, e: 1e9 }]) : [];
 
-    // 入れる候補
-    var soon = shiftIso(iso, 3), cands = [];
+    var soon = shiftIso(iso, 3), cands = [], freed = [];
     Store.SPACES.forEach(function (sp) {
       Store.list(sp, 'task').forEach(function (t) {
-        if (isDev(t) || t.time) return;                           // 時刻のあるものは、もう予定（動かさない）
-        if (isHabit(t)) { if (onDay(t, iso) && !habitDone(t, iso)) cands.push({ sp: sp, t: t, habit: true, tier: 0 }); return; }
-        if (t.done || (t.doOn && t.doOn > iso)) return;           // やる日が先に決まっているものは前倒ししない
-        var today = (t.doOn && t.doOn <= iso) || (t.due && t.due <= iso);
-        var rush = (t.due && t.due <= soon) || prioOf(t) === 'high';
-        if (today) cands.push({ sp: sp, t: t, habit: false, tier: 0 });
+        if (isDev(t)) return;
+        if (isHabit(t)) {
+          if (t.time || !onDay(t, iso)) return;
+          if (t.autoAt && t.autoAt[iso]) freed.push({ sp: sp, t: t, habit: true });
+          if (!habitDone(t, iso)) cands.push({ sp: sp, t: t, habit: true, tier: 0 });
+          return;
+        }
+        if (t.time && t.auto !== iso) return;                          // 自分で決めた時刻は動かさない
+        if (t.time) freed.push({ sp: sp, t: t, habit: false });
+        if (t.done || (t.doOn && t.doOn > iso)) return;               // やる日が先に決まっているものは前倒ししない
+        var mine = t.doOn === iso || t.due === iso || t.auto === iso;
+        var late = iso === today && ((t.doOn && t.doOn < iso) || (t.due && t.due < iso));
+        var rush = iso === today && !t.doOn && ((t.due && t.due <= soon) || prioOf(t) === 'high');
+        if (mine || late) cands.push({ sp: sp, t: t, habit: false, tier: 0 });
         else if (rush) cands.push({ sp: sp, t: t, habit: false, tier: 1 });
       });
     });
     cands.sort(function (a, b) {
       var oa = a.t.due && a.t.due < iso ? 0 : 1, ob = b.t.due && b.t.due < iso ? 0 : 1;
       return a.tier - b.tier || oa - ob || PRIO[prioOf(a.t)].rank - PRIO[prioOf(b.t)].rank
-        || (a.t.due || '9999') .localeCompare(b.t.due || '9999') || (a.t.createdAt || 0) - (b.t.createdAt || 0);
+        || (a.t.due || '9999').localeCompare(b.t.due || '9999') || (a.t.createdAt || 0) - (b.t.createdAt || 0);
     });
 
     var placed = [], left = [];
     cands.forEach(function (x) {
-      var wins = x.sp === 'work' ? inWork : own, d = durOf(x.t);
+      var d = durOf(x.t), wins = x.sp === 'work' ? inWork : own;
       if (x.sp === 'work' && !work) {
-        if (x.tier === 0) left.push({ sp: x.sp, t: x.t, why: workOf(iso) ? 'この日は仕事が休み' : 'この日の仕事の時間が入っていない' });
+        if (x.tier === 0) left.push({ sp: x.sp, t: x.t, why: workOf(iso) ? 'この日は仕事が休み' : 'この日の仕事を入れていない' });
         return;
       }
       for (var i = 0; i < wins.length; i++) {
@@ -949,77 +994,146 @@
           return;
         }
       }
-      if (x.tier === 0) left.push({ sp: x.sp, t: x.t, why: x.sp === 'work' ? '仕事の時間に空きが足りない' : '空いている時間が足りない' });
+      if (x.tier === 0) {
+        left.push({ sp: x.sp, t: x.t, why: x.sp === 'work' ? (work.out ? 'もう退勤した' : '仕事の時間に空きが足りない') : '空いている時間が足りない' });
+      }
     });
-    return { wake: wake, bed: bed, sleep: sleep, short: short, work: work, workSet: !!workOf(iso), placed: placed, left: left };
+    return { placed: placed, left: left, freed: freed };
   }
 
   function clock(m) { m = ((m % 1440) + 1440) % 1440; return Math.floor(m / 60) + ':' + U.pad(m % 60); }
   function hoursLabel(m) { var h = Math.floor(m / 60), r = m % 60; return h + '時間' + (r ? r + '分' : ''); }
+  function pruneAutoAt(h) {
+    var keep = shiftIso(U.today(), -14);
+    Object.keys(h.autoAt || {}).forEach(function (k) { if (k < keep) delete h.autoAt[k]; });
+  }
 
-  /** 案のとおりに、タスクへ時刻とやる日を書く（習慣は変えない）。「もどす」で前の値に戻せる */
-  function applyDraft() {
-    if (!planDraft) return;
-    var iso = planDraft.iso, back = [], n = 0, habits = 0;
-    planDraft.r.placed.forEach(function (p) {
-      if (p.habit) { habits++; return; }
-      var t = Store.get(p.sp, 'task', p.t.id);
-      if (!t || t.deleted || t.done || t.time) return;      // 案を作ったあとに変わったものは触らない
-      back.push({ sp: p.sp, id: t.id, time: t.time || '', dur: t.dur, doOn: t.doOn || '' });
-      t.time = fromMin(p.s); t.dur = p.e - p.s; t.doOn = iso;
-      Store.put(p.sp, 'task', t);
-      n++;
+  /** 組んで、そのまま書く。自動の印のものは、入らなければ時刻を外す（やる日は残す）。「もどす」で全部前に戻せる */
+  function applyPlan(iso, opt) {
+    opt = opt || {};
+    var r = autoPlan(iso, opt.from), back = [], touched = {};
+    function snapOf(sp, t) {
+      var k = sp + '/' + t.id;
+      if (touched[k]) return;
+      touched[k] = true;
+      back.push({ sp: sp, id: t.id, time: t.time, dur: t.dur, doOn: t.doOn, auto: t.auto, autoAt: t.autoAt ? JSON.parse(JSON.stringify(t.autoAt)) : undefined });
+    }
+    // 前に自動で入れた時刻を、いったん外す（入らなかったものは外れたまま）
+    r.freed.forEach(function (x) {
+      var t = Store.get(x.sp, 'task', x.t.id);
+      if (!t) return;
+      snapOf(x.sp, t);
+      if (x.habit) { if (t.autoAt) delete t.autoAt[iso]; } else { t.time = ''; t.dur = 0; delete t.auto; }
     });
-    planDraft = null;
+    r.placed.forEach(function (p) {
+      var t = Store.get(p.sp, 'task', p.t.id);
+      if (!t) return;
+      snapOf(p.sp, t);
+      if (p.habit) { t.autoAt = t.autoAt || {}; t.autoAt[iso] = fromMin(p.s); pruneAutoAt(t); }
+      else { t.time = fromMin(p.s); t.dur = p.e - p.s; t.doOn = iso; t.auto = iso; }
+    });
+    back.forEach(function (b) { var t = Store.get(b.sp, 'task', b.id); if (t) Store.put(b.sp, 'task', t); });
+    planRuns[iso] = { at: Date.now(), placed: r.placed, left: r.left };
     renderAll();
-    toast(n + '件の時刻を決めました' + (habits ? '（習慣の時刻は変えていません）' : ''), function () {
+    if (opt.quiet) return r;
+    toast((opt.label || '組みました') + '（' + r.placed.length + '件' + (r.left.length ? '・入らない ' + r.left.length + '件' : '') + '）', function () {
       back.forEach(function (b) {
         var t = Store.get(b.sp, 'task', b.id);
         if (!t) return;
-        t.time = b.time; t.dur = b.dur; t.doOn = b.doOn;
-        if (t.dur == null) delete t.dur;
+        ['time', 'dur', 'doOn', 'auto', 'autoAt'].forEach(function (k) { if (b[k] === undefined) delete t[k]; else t[k] = b[k]; });
         Store.put(b.sp, 'task', t);
       });
+      delete planRuns[iso];
+      if (opt.undo) opt.undo();
       renderAll();
     });
+    return r;
   }
 
-  /** その日の仕事の時間を入れる（会社の側の記録として同期する） */
+  /** 退勤：今の時刻で仕事を終わりにして、家に着いてからの残りを組む */
+  function clockOut(iso) {
+    var w = workOf(iso);
+    if (!w || w.off) return;
+    var now = nowMin(), prev = w.clockOut || '';
+    w.clockOut = fromMin(now);
+    Store.put('work', 'day', w);
+    var sp = workSpan(iso);
+    applyPlan(iso, { from: now + (sp ? sp.com : 0), label: '退勤しました。残りを組みました', undo: function () {
+      var cur = workOf(iso);
+      if (cur) { if (prev) cur.clockOut = prev; else delete cur.clockOut; Store.put('work', 'day', cur); }
+    } });
+  }
+
+  /** その日の仕事を入れる・直す（会社の側の記録として同期する）。決めたら、その日を組む */
   function editWork(iso) {
-    var w = workOf(iso), prev = null;
-    for (var i = 1; i <= 14 && !prev; i++) { var p = workOf(shiftIso(iso, -i)); if (p && !p.off && p.start) prev = p; }
-    var off = !!(w && w.off);
-    var start = (w && w.start) || (prev && prev.start) || '10:00', end = (w && w.end) || (prev && prev.end) || '22:00';
-    var d = U.parse(iso);
+    var w = workOf(iso), places = workplaces();
+    var d = U.parse(iso), dow = String(d.getDay());
+    var cur = { off: !!(w && w.off), place: (w && w.place) || (places[0] && places[0].id) || '', shift: (w && w.shift) || '',
+                start: (w && w.start) || '', end: (w && w.end) || '' };
+    if (!w && places[0]) { var r0 = ruleTimes(places[0], '', iso); if (r0) { cur.shift = r0.shift; cur.start = r0.start; cur.end = r0.end; } }
+    if (!cur.start) { cur.start = '10:00'; cur.end = '22:00'; }
     modal('<h2>' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + DOW[d.getDay()] + '）の仕事</h2>'
-      + '<div class="f"><div class="seg3" id="wk-off"><button type="button" data-off="0"' + (off ? '' : ' class="on"') + '>仕事あり</button>'
-      + '<button type="button" data-off="1"' + (off ? ' class="on"' : '') + '>休み</button></div></div>'
-      + '<div class="f" id="wk-times"' + (off ? ' hidden' : '') + '><label>始まり と 終わり</label><div class="f2">'
-      + '<input type="time" id="wk-s" step="300" value="' + start + '"><input type="time" id="wk-e" step="300" value="' + end + '"></div>'
-      + '<div class="hint" style="margin-top:6px">終わりが始まりより前なら、次の日の朝までの仕事として組みます</div></div>'
-      + (prev && !w ? '<div class="hint">前に入れた日（' + U.md(prev.date) + '）と同じ時間を出しています</div>' : '')
+      + '<div class="f"><label>どこで働くか</label><div class="seg3 wkplace" id="wk-place">'
+      + places.map(function (p) { return '<button type="button" data-place="' + U.esc(p.id) + '"' + (!cur.off && cur.place === p.id ? ' class="on"' : '') + '>' + U.esc(p.name) + '</button>'; }).join('')
+      + '<button type="button" data-place=""' + (cur.off ? ' class="on"' : '') + '>休み</button></div>'
+      + (places.length ? '' : '<div class="hint" style="margin-top:6px">職場の決まりがまだ届いていません（同期を待つか、時間を手で入れてください）</div>') + '</div>'
+      + '<div class="f" id="wk-shiftf" hidden><label>時間帯</label><div class="seg3" id="wk-shift"></div></div>'
+      + '<div class="f" id="wk-times"' + (cur.off ? ' hidden' : '') + '><label>出勤 と 退勤</label><div class="f2">'
+      + '<input type="time" id="wk-s" step="300" value="' + cur.start + '"><input type="time" id="wk-e" step="300" value="' + cur.end + '"></div>'
+      + '<div class="hint" style="margin-top:6px" id="wk-hint"></div></div>'
+      + '<div class="hint">決めると、この日の予定を組みます（出勤の前に入れられるものも入れます。あとから自分で直せます）。</div>'
       + '<div class="acts">' + (w ? '<button type="button" class="del" id="wk-del">消す</button>' : '')
       + '<button type="button" id="wk-cancel">やめる</button><button type="button" class="go" id="wk-ok">決める</button></div>',
       function (m) {
-        m.querySelectorAll('#wk-off [data-off]').forEach(function (b) {
-          b.onclick = function () {
-            m.querySelectorAll('#wk-off [data-off]').forEach(function (x) { x.classList.toggle('on', x === b); });
-            m.querySelector('#wk-times').hidden = b.dataset.off === '1';
-          };
+        var st = { off: cur.off, place: cur.place, shift: cur.shift };
+        function hint() {
+          var p = placeOf(st.place), s = m.querySelector('#wk-s').value, e = m.querySelector('#wk-e').value;
+          m.querySelector('#wk-hint').textContent = (p ? '通勤は片道 ' + (p.commute || 0) + '分で組みます。' : '')
+            + (s && e && toMin(e) <= toMin(s) ? '退勤は次の日の ' + e + ' です。' : '');
+        }
+        function paintShift(fill) {
+          var p = placeOf(st.place), list = shiftsOf(p);
+          m.querySelector('#wk-shiftf').hidden = st.off || list.length < 2;
+          if (list.length && !list.some(function (s) { return s.id === st.shift; })) st.shift = list[0].id;
+          m.querySelector('#wk-shift').innerHTML = list.map(function (s) {
+            return '<button type="button" data-shift="' + U.esc(s.id) + '"' + (s.id === st.shift ? ' class="on"' : '') + '>' + U.esc(s.name || '通し') + '</button>';
+          }).join('');
+          if (fill && p) {
+            var r = ruleTimes(p, st.shift, iso);
+            if (r) { m.querySelector('#wk-s').value = r.start; m.querySelector('#wk-e').value = r.end; }
+          }
+          m.querySelector('#wk-times').hidden = st.off;
+          hint();
+        }
+        paintShift(false);
+        m.querySelector('#wk-place').addEventListener('click', function (e) {
+          var b = e.target.closest('[data-place]');
+          if (!b) return;
+          st.off = !b.dataset.place; if (!st.off) st.place = b.dataset.place;
+          m.querySelectorAll('#wk-place [data-place]').forEach(function (x) { x.classList.toggle('on', x === b); });
+          paintShift(true);
         });
+        m.querySelector('#wk-shift').addEventListener('click', function (e) {
+          var b = e.target.closest('[data-shift]');
+          if (!b) return;
+          st.shift = b.dataset.shift;
+          paintShift(true);
+        });
+        ['#wk-s', '#wk-e'].forEach(function (id) { m.querySelector(id).addEventListener('change', hint); });
         m.querySelector('#wk-cancel').onclick = closeModal;
-        if (w) m.querySelector('#wk-del').onclick = function () { Store.remove('work', 'day', w.id); planDraft = null; closeModal(); renderAll(); };
+        if (w) m.querySelector('#wk-del').onclick = function () { Store.remove('work', 'day', w.id); closeModal(); renderAll(); };
         m.querySelector('#wk-ok').onclick = function () {
-          var isOff = m.querySelector('#wk-off .on').dataset.off === '1';
           var s = m.querySelector('#wk-s').value, e = m.querySelector('#wk-e').value;
-          if (!isOff && (!s || !e)) { toast('始まりと終わりを入れてください'); return; }
-          if (!isOff && s === e) { toast('始まりと終わりが同じです'); return; }
+          if (!st.off && (!s || !e)) { toast('出勤と退勤を入れてください'); return; }
+          if (!st.off && s === e) { toast('出勤と退勤が同じです'); return; }
           var rec = w || { id: 'day-w-' + iso, type: 'work', date: iso, createdAt: Date.now() };
-          rec.off = isOff; rec.start = isOff ? '' : s; rec.end = isOff ? '' : e;
-          rec.text = isOff ? '仕事 休み' : '仕事 ' + s + '〜' + e;
+          rec.off = st.off; rec.place = st.off ? '' : st.place; rec.shift = st.off ? '' : st.shift;
+          rec.start = st.off ? '' : s; rec.end = st.off ? '' : e; rec.from = '';      // 手で決めた（Diem の取り込みより強い）
+          delete rec.clockOut;
+          rec.text = st.off ? '仕事 休み' : '仕事 ' + workName(rec) + ' ' + s + '〜' + e;
           Store.put('work', 'day', rec);
-          planDraft = null;
-          closeModal(); renderAll();
+          closeModal();
+          applyPlan(iso, { label: 'この日を組みました' });
         };
       });
   }
@@ -1033,77 +1147,78 @@
       + '<div class="f"><label for="pc-prep">起きてから動き出すまで（分）</label><input type="text" inputmode="numeric" id="pc-prep" value="' + c.prepMin + '"></div>'
       + '<div class="f"><label for="pc-wind">寝る前のゆとり（分）</label><input type="text" inputmode="numeric" id="pc-wind" value="' + c.windMin + '"></div>'
       + '<div class="f"><label for="pc-gap">予定と予定のあいだ（分）</label><input type="text" inputmode="numeric" id="pc-gap" value="' + c.gapMin + '"></div>'
-      + '<div class="hint">この端末だけの決まりです。タスクの長さは、タスクの「時刻と長さ」（無ければ30分）を使います。</div>'
+      + '<div class="hint">この端末だけの決まりです。通勤の時間は職場ごとに決まっています。タスクの長さは、タスクの「時刻と長さ」（無ければ30分）を使います。</div>'
       + '<div class="acts"><button type="button" id="pc-reset">はじめの値</button><button type="button" id="pc-cancel">やめる</button><button type="button" class="go" id="pc-ok">決める</button></div>',
       function (m) {
         m.querySelector('#pc-cancel').onclick = closeModal;
-        m.querySelector('#pc-reset').onclick = function () { delete Store.ui().planConf; Store.saveUi(); planDraft = null; closeModal(); renderAll(); };
+        m.querySelector('#pc-reset').onclick = function () { delete Store.ui().planConf; Store.saveUi(); closeModal(); renderAll(); };
         m.querySelector('#pc-ok').onclick = function () {
           var num = function (id) { return Number(String(m.querySelector(id).value).normalize('NFKC')); };
           Store.ui().planConf = { sleepH: num('#pc-sleep'), wake: m.querySelector('#pc-wake').value, prepMin: num('#pc-prep'), windMin: num('#pc-wind'), gapMin: num('#pc-gap') };
           Store.saveUi();
-          planDraft = null;
           closeModal(); renderAll();
         };
       });
   }
 
   /** 予定のページの上の「その日の組み立て」 */
-  function planHead(iso, r) {
-    var w = workOf(iso), c = planConf();
-    var work = !w ? '<span class="pk">仕事</span><span class="pv dim">まだ入れていません</span><button type="button" class="mini" data-act="pwork">入れる</button>'
-      : w.off ? '<span class="pk">仕事</span><span class="pv">休み</span><button type="button" class="mini" data-act="pwork">直す</button>'
-      : '<span class="pk">仕事</span><span class="pv"><b>' + U.esc(w.start) + '〜' + U.esc(w.end) + '</b>' + (toMin(w.end) <= toMin(w.start) ? '（次の日まで）' : '') + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
-    var sleep = '<span class="pk">睡眠</span><span class="pv">起きる <b>' + clock(r.wake) + '</b>・寝る <b>' + clock(r.bed) + '</b>'
-      + '<small>（' + hoursLabel(r.sleep) + (r.short ? '・<em>目標の' + c.sleepH + '時間に足りません</em>' : '') + '）</small></span>';
-    var h = '<div class="card planhead">'
-      + '<div class="prow">' + work + '</div>'
-      + '<div class="prow">' + sleep + '</div>'
-      + '<div class="pacts"><button type="button" class="mini go2" data-act="pauto">✦ 自動で組む</button>'
-      + '<button type="button" class="linkbtn" data-act="pconf">組み方の決まり</button></div></div>';
-    if (planDraft && planDraft.iso === iso) {
-      var d = planDraft.r, tasks = d.placed.filter(function (p) { return !p.habit; }).length;
-      h += '<div class="card plandraft"><div class="pdt">✦ 自動で組んだ案</div>'
-        + '<div class="pds">起きる ' + clock(d.wake) + '・寝る ' + clock(d.bed) + '／入れた ' + d.placed.length + '件'
-        + (d.left.length ? '・入らなかった ' + d.left.length + '件' : '') + '</div>'
-        + (d.placed.length ? '<ol class="pdl">' + d.placed.slice().sort(function (a, b) { return a.s - b.s; }).map(function (p) {
-            return '<li><span class="pdtime">' + fromMin(p.s) + '〜' + fromMin(p.e) + '</span><span class="sptag ' + p.sp + '">' + label(p.sp) + '</span>'
-              + U.esc(p.t.title) + (p.habit ? ' <small>↻習慣</small>' : '') + '</li>';
-          }).join('') + '</ol>' : '<div class="hint">入れられるタスクがありませんでした。</div>')
-        + (d.left.length ? '<div class="pdleft"><b>入らなかったもの</b>' + d.left.map(function (x) {
-            return '<div>・' + U.esc(x.t.title) + '<small>（' + label(x.sp) + '・' + U.esc(x.why) + '）</small></div>';
-          }).join('') + '</div>' : '')
-        + '<div class="acts"><button type="button" data-act="pdraftclose">やめる</button>'
-        + '<button type="button" class="go" data-act="papply"' + (tasks ? '' : ' disabled') + '>この案で決める（' + tasks + '件）</button></div>'
-        + '<div class="hint" style="margin:8px 0 0">決めると、タスクに時刻とやる日が入ります（「もどす」で戻せます）。習慣の時刻は変えません。</div></div>';
+  function planHead(iso, sl) {
+    var w = workOf(iso), ws = workSpan(iso), c = planConf(), today = U.today();
+    var work;
+    if (!w) work = '<span class="pv dim">まだ入れていません</span><button type="button" class="mini" data-act="pwork">入れる</button>';
+    else if (w.off) work = '<span class="pv">休み' + (w.from === 'diem' ? '<small>（Diem から）</small>' : '') + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
+    else work = '<span class="pv"><b>' + U.esc(workName(w)) + '</b> ' + U.esc(w.start) + '〜' + U.esc(w.clockOut || w.end)
+      + (w.clockOut ? '<small>（退勤ずみ）</small>' : toMin(w.end) <= toMin(w.start) ? '<small>（次の日まで）</small>' : '')
+      + (ws && ws.com ? '<small>・通勤 片道' + ws.com + '分</small>' : '') + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
+    var out = '';
+    if (w && !w.off && iso === today) {
+      out = w.clockOut
+        ? '<div class="prow"><span class="pk"></span><span class="pv dim">' + U.esc(w.clockOut) + ' に退勤しました</span><button type="button" class="linkbtn" data-act="pclockback">取り消す</button></div>'
+        : '<button type="button" class="clockout" data-act="pclockout">退勤する<small>（押すと、帰ってからの残りを組みます）</small></button>';
     }
-    return h;
+    var run = planRuns[iso];
+    var autoN = planItems(iso).filter(function (x) { return x.auto; }).length;
+    var h = '<div class="card planhead">'
+      + '<div class="prow"><span class="pk">仕事</span>' + work + '</div>' + out
+      + '<div class="prow"><span class="pk">睡眠</span><span class="pv">起きる <b>' + clock(sl.wake) + '</b>・寝る <b>' + clock(sl.bed) + '</b>'
+      + '<small>（' + hoursLabel(sl.sleep) + (sl.short ? '・<em>目標の' + c.sleepH + '時間に足りません</em>' : '') + '）</small></span></div>'
+      + '<div class="pacts"><button type="button" class="mini go2" data-act="pauto">✦ ' + (autoN ? '組み直す' : '自動で組む') + '</button>'
+      + '<span class="pauton">' + (autoN ? '自動で入れたもの ' + autoN + '件' : '') + '</span>'
+      + '<button type="button" class="linkbtn" data-act="pconf">組み方の決まり</button></div>';
+    if (run && run.left.length) {
+      h += '<div class="pdleft"><b>入らなかったもの</b>' + run.left.map(function (x) {
+        return '<div>・' + U.esc(x.t.title) + '<small>（' + label(x.sp) + '・' + U.esc(x.why) + '）</small></div>';
+      }).join('') + '</div>';
+    }
+    return h + '</div>';
   }
 
   function renderPlan() {
     var iso = planDate || U.today();
-    if (planDraft && planDraft.iso !== iso) planDraft = null;     // 日を動かしたら、案はしまう
-    var auto = autoPlan(iso), draft = planDraft && planDraft.iso === iso ? planDraft.r : null;
     var d = U.parse(iso), today = U.today();
     var diff = U.daysFrom(iso);
     document.getElementById('planDate').innerHTML = '<b>' + (d.getMonth() + 1) + '月' + d.getDate() + '日</b>（' + DOW[d.getDay()] + '）'
       + (diff === 0 ? '<span class="rel now">今日</span>' : diff === 1 ? '<span class="rel">明日</span>' : diff === -1 ? '<span class="rel">昨日</span>' : '');
     document.getElementById('planToday').hidden = iso === today;
 
+    var sl = sleepOf(iso), ws = workSpan(iso);
+    // 前の日の仕事・通勤・睡眠が0時を越えてこの日にかかる分（例：3:30まで働いた次の日）
+    var pw = workSpan(shiftIso(iso, -1)), pbed = sleepOf(shiftIso(iso, -1)).bed - 1440;
+    var carry = pw && pw.e + pw.com > 1440 ? { e: pw.e - 1440, home: pw.e + pw.com - 1440, w: pw.w, com: pw.com } : null;
     var all = planItems(iso);
-    var loose = all.filter(function (x) { return !x.t.time; });
-    var timed = all.filter(function (x) { return x.t.time; }).map(function (x) {
-      x.s = toMin(x.t.time); x.e = Math.min(1440, x.s + durOf(x.t)); return x;
+    var loose = all.filter(function (x) { return !x.time; });
+    var timed = all.filter(function (x) { return x.time; }).map(function (x) {
+      x.s = toMin(x.time); x.e = Math.min(1440, x.s + durOf(x.t)); return x;
     });
     layout(timed);
 
-    var h = planHead(iso, auto);
+    var h = planHead(iso, sl);
     // 数の帯
     var doneN = all.filter(function (x) { return x.done; }).length;
     h += '<div class="plansum">' + (all.length
       ? '<span class="fact calm">予定 <b>' + all.length + '</b></span><span class="fact' + (doneN === all.length ? ' wait' : ' calm') + '">済み <b>' + doneN + '</b></span>'
-        + '<span class="legend"><i class="lg personal"></i>個人<i class="lg work"></i>会社<i class="lg habit"></i>習慣</span>'
-      : '<span class="fact calm">この日の予定はありません</span>') + '</div>';
+      : '<span class="fact calm">この日の予定はありません</span>')
+      + '<span class="legend"><i class="lg personal"></i>個人<i class="lg work"></i>会社<i class="lg habit"></i>習慣</span></div>';
 
     // 時間を決めていないもの
     if (loose.length) {
@@ -1111,7 +1226,7 @@
       h += '<div class="habithead">時間を決めていないもの<span>' + loose.length + '件</span></div><div class="card list">'
         + loose.map(function (x) {
             return '<div class="trow pl ' + x.sp + (x.habit ? ' habit' : '') + (x.done ? ' done' : '') + '" data-id="' + U.esc(x.t.id) + '" data-sp="' + x.sp + '" data-prio="' + prioOf(x.t) + '">'
-              + planCheck(x).replace('class="ck"', 'class="ck"')
+              + planCheck(x)
               + '<button type="button" class="tbody" data-act="ptoggle"><span class="ttl">' + U.esc(x.t.title) + '</span>'
               + '<span class="sub"><span class="sptag ' + x.sp + '">' + label(x.sp) + '</span>'
               + (x.habit ? '<span class="reptag">↻ ' + U.esc(repeatLabel(x.t)) + '</span>' : '')
@@ -1120,54 +1235,59 @@
           }).join('') + '</div>';
     }
 
-    // タイムテーブル
-    var startH = 7, endH = 22;
+    // タイムテーブル：起きる1時間前から、寝た1時間後まで（0時を越えない）
+    var startH = carry ? 0 : Math.max(0, Math.min(7, Math.floor(sl.wake / 60) - 1)), endH = 22;
     timed.forEach(function (x) { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.ceil(x.e / 60)); });
-    startH = Math.min(startH, Math.floor(auto.wake / 60));
-    if (auto.bed < 1440) endH = Math.max(endH, Math.ceil(auto.bed / 60));
-    if (auto.work) { startH = Math.min(startH, Math.floor(auto.work.s / 60)); endH = Math.max(endH, Math.ceil(Math.min(1440, auto.work.e) / 60)); }
-    if (draft) draft.placed.forEach(function (p) { startH = Math.min(startH, Math.floor(p.s / 60)); endH = Math.max(endH, Math.ceil(p.e / 60)); });
+    endH = Math.max(endH, Math.min(24, Math.ceil(sl.bed / 60) + 1));
+    if (ws) { startH = Math.min(startH, Math.floor((ws.s - ws.com) / 60)); endH = Math.max(endH, Math.ceil(Math.min(1440, ws.e + ws.com) / 60)); }
     if (iso === today) {
-      var nowM = new Date().getHours() * 60 + new Date().getMinutes();
+      var nowM = nowMin();
       startH = Math.min(startH, Math.floor(nowM / 60)); endH = Math.max(endH, Math.ceil((nowM + 1) / 60));
     }
     endH = Math.min(24, endH);
-    var px = function (m) { return (m - startH * 60) * HOUR / 60; };
+    var top0 = startH * 60, bot0 = endH * 60;
+    var px = function (m) { return (m - top0) * HOUR / 60; };
+    /** 帯（睡眠・仕事・通勤）。札は予定の枠より上に出す（枠に隠れないように、帯とは別の重なりで） */
+    function block(cls, s, e, text) {
+      s = Math.max(s, top0); e = Math.min(e, bot0);
+      if (e - s < 1) return '';
+      return '<div class="' + cls + '" style="top:' + px(s) + 'px;height:' + (px(e) - px(s)) + 'px"></div>'
+        + (text ? '<div class="bandlabel ' + cls + '-l" style="top:' + (px(s) + 2) + 'px">' + text + '</div>' : '');
+    }
     h += '<div class="tt" style="height:' + ((endH - startH) * HOUR + 1) + 'px">';
     for (var hr = startH; hr < endH; hr++) {
       h += '<button type="button" class="slot" data-act="slot" data-h="' + hr + '" style="top:' + px(hr * 60) + 'px;height:' + HOUR + 'px" aria-label="' + hr + '時に足す">'
         + '<span class="hl">' + hr + ':00</span></button>';
     }
-    // 仕事の時間の帯・起きる／寝るの線・案（点線の枠。押しても何も起きない）
-    if (auto.work) {
-      var ws = Math.max(auto.work.s, startH * 60), we = Math.min(auto.work.e, endH * 60);
-      if (we > ws) h += '<div class="workband" style="top:' + px(ws) + 'px;height:' + (px(we) - px(ws)) + 'px"></div>'
-        + '<div class="worklabel" style="top:' + (px(ws) + 2) + 'px">仕事 ' + clock(auto.work.s) + '〜' + clock(auto.work.e) + '</div>';
+    // 睡眠（個人の色）・仕事と通勤（会社の色）
+    h += block('sleepblock', Math.max(top0, pbed > 0 ? pbed : 0), sl.wake, '睡眠') + block('sleepblock', sl.bed, bot0, '睡眠');
+    if (carry) {
+      if (carry.e > 0) h += block('workband', 0, carry.e, U.esc(workName(carry.w)) + '（前の日から）〜' + clock(carry.e));
+      if (carry.com) h += block('commute', Math.max(0, carry.e), carry.home, '通勤 ' + carry.com + '分');
     }
-    if (auto.wake >= startH * 60) h += '<div class="sleepline wake" style="top:' + px(auto.wake) + 'px"><span>起きる ' + clock(auto.wake) + '</span></div>';
-    if (auto.bed < endH * 60) h += '<div class="sleepline bed" style="top:' + px(auto.bed) + 'px"><span>寝る ' + clock(auto.bed) + '</span></div>';
-    if (draft) draft.placed.forEach(function (p) {
-      var top = px(p.s), height = Math.max(22, px(p.e) - top - 2);
-      h += '<div class="ev draft ' + p.sp + '" style="top:' + top + 'px;height:' + height + 'px;left:46px;width:calc(100% - 52px)">'
-        + '<span class="evbody"><span class="evt">案：' + U.esc(p.t.title) + '</span><span class="evs">' + fromMin(p.s) + '〜' + fromMin(p.e) + (p.habit ? ' ・↻' : '') + '</span></span></div>';
-    });
+    if (ws) {
+      h += block('workband', ws.s, ws.e, U.esc(workName(ws.w)) + ' ' + clock(ws.s) + '〜' + clock(ws.e));
+      if (ws.com) h += block('commute', ws.s - ws.com, ws.s, '通勤 ' + ws.com + '分') + block('commute', ws.e, ws.e + ws.com, '通勤 ' + ws.com + '分');
+    }
+    if (sl.wake >= top0) h += '<div class="sleepline wake" style="top:' + px(sl.wake) + 'px"><span>起きる ' + clock(sl.wake) + '</span></div>';
+    if (sl.bed < bot0) h += '<div class="sleepline bed" style="top:' + px(sl.bed) + 'px"><span>寝る ' + clock(sl.bed) + '</span></div>';
     timed.forEach(function (x) {
       var top = px(x.s), height = Math.max(24, px(x.e) - top - 2);
       var w = 100 / x.n;
-      h += '<div class="ev ' + x.sp + (x.habit ? ' habit' : '') + (x.done ? ' done' : '') + (height < 40 ? ' short' : '') + '" data-id="' + U.esc(x.t.id) + '" data-sp="' + x.sp + '" data-prio="' + prioOf(x.t) + '"'
+      h += '<div class="ev ' + x.sp + (x.habit ? ' habit' : '') + (x.done ? ' done' : '') + (x.auto ? ' auto' : '') + (height < 40 ? ' short' : '') + '" data-id="' + U.esc(x.t.id) + '" data-sp="' + x.sp + '" data-prio="' + prioOf(x.t) + '"'
         + ' style="top:' + top + 'px;height:' + height + 'px;left:calc(46px + (100% - 52px) * ' + (x.col * w / 100) + ');width:calc((100% - 52px) * ' + (w / 100) + ' - 3px)">'
         + planCheck(x)
         + '<button type="button" class="evbody" data-act="pedit">'
         + '<span class="evt">' + U.esc(x.t.title) + '</span>'
-        + '<span class="evs">' + timeLabel(x.t) + (x.habit ? ' ・↻' : '') + (x.habit && movedFrom(x.t, iso) ? ' ・↪移した' : '') + '</span>'
+        + '<span class="evs">' + x.time + '〜' + fromMin(toMin(x.time) + durOf(x.t)) + (x.habit ? ' ・↻' : '') + (x.auto ? ' ・自動' : '') + (x.habit && movedFrom(x.t, iso) ? ' ・↪移した' : '') + '</span>'
         + '</button></div>';
     });
     if (iso === today) {
-      var nm = new Date().getHours() * 60 + new Date().getMinutes();
+      var nm = nowMin();
       h += '<div class="nowline" style="top:' + px(nm) + 'px"><span>' + fromMin(nm) + '</span></div>';
     }
     h += '</div>';
-    h += '<div class="devnote plannote">空いている時間を押すと、その時刻で「' + U.esc(label()) + '」のタスクを足せます。</div>';
+    h += '<div class="devnote plannote">空いている時間を押すと、その時刻で予定を足せます。「自動」と付いたものは自動で入れた時刻です。押して直すと、自分で決めた時刻になります。</div>';
     document.getElementById('planBody').innerHTML = h;
 
     // 今日を開いたら、いまの時刻が見えるところまで送る（初めの1回だけ）
@@ -1178,18 +1298,27 @@
     }
   }
 
-  /** 空いている時間を押したとき：その時刻でタスクを足す（いま開いている側へ） */
+  /** 空いている時間を押したとき：その時刻で予定を足す（個人か会社かを選ぶ。はじめは今開いている側） */
   function addAtSlot(hr) {
     var iso = planDate || U.today(), sp = space();
-    modal('<h2>' + (U.parse(iso).getMonth() + 1) + '/' + U.parse(iso).getDate() + ' の予定を足す（' + U.esc(label(sp)) + '）</h2>'
+    modal('<h2>' + (U.parse(iso).getMonth() + 1) + '/' + U.parse(iso).getDate() + ' の予定を足す</h2>'
+      + '<div class="f"><label>どちらの予定か</label><div class="seg3" id="s-sp">'
+      + Store.SPACES.map(function (x) { return '<button type="button" data-sp="' + x + '"' + (x === sp ? ' class="on"' : '') + '>' + U.esc(label(x)) + '</button>'; }).join('') + '</div></div>'
       + '<div class="f"><label for="s-title">やること</label><input type="text" id="s-title" enterkeyhint="done"></div>'
       + '<div class="f"><label for="s-time">時刻と長さ</label><div class="f2">'
       + '<input type="time" id="s-time" step="300" value="' + U.pad(hr) + ':00"><select id="s-dur">' + durOptions(60) + '</select></div></div>'
       + '<div class="f"><label>重要度</label>' + prioSeg('s-prio', 'mid') + '</div>'
-      + (sp === 'work' ? '<div class="hint">会社のタスクには、金額・氏名・IDを書かない</div>' : '')
+      + '<div class="hint" id="s-rule"' + (sp === 'work' ? '' : ' hidden') + '>会社のタスクには、金額・氏名・IDを書かない</div>'
       + '<div class="acts"><button type="button" id="s-cancel">やめる</button><button type="button" class="go" id="s-ok">足す</button></div>',
       function (m) {
         var prio = 'mid';
+        m.querySelectorAll('#s-sp [data-sp]').forEach(function (b) {
+          b.onclick = function () {
+            sp = b.dataset.sp;
+            m.querySelectorAll('#s-sp [data-sp]').forEach(function (x) { x.classList.toggle('on', x === b); });
+            m.querySelector('#s-rule').hidden = sp !== 'work';
+          };
+        });
         m.querySelectorAll('#s-prio [data-prio]').forEach(function (b) {
           b.onclick = function () {
             prio = b.dataset.prio;
@@ -1204,11 +1333,127 @@
           var time = m.querySelector('#s-time').value || (U.pad(hr) + ':00');
           Store.put(sp, 'task', { title: title, prio: prio, due: '', doOn: iso, time: time, dur: +m.querySelector('#s-dur').value || 60,
                                   note: '', done: false, repeat: '', days: [] });
-          closeModal(); renderAll(); toast('予定を足しました');
+          closeModal(); renderAll(); toast(label(sp) + 'の予定を足しました');
         };
         m.querySelector('#s-ok').onclick = ok;
         m.querySelector('#s-title').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } });
         setTimeout(function () { m.querySelector('#s-title').focus(); }, 50);
+      });
+  }
+
+  /* ---------- Diem の休み（2026-10-23 ko-dai さんの願い） ----------
+     Diem（2人のカレンダー）に入れた自分の「休み」の予定を読んで、その日を仕事の休みにし、その日を組む。
+       ・読むだけ。Diem には何も書かない。読んだ予定の中身も残さない（休みの日付だけを使う）
+       ・★Diem の「自分だけ」の予定は、Diem の受け口に送られない（端末の中だけ）ので読めない。「2人で共有」で入れた休みだけが届く
+       ・自分の休みかは、予定を入れた人の名前（Diem の「自分の名前」）で見分ける（相手の休みを拾わないため）
+       ・題に休みの言葉（はじめは「休み」）がふくまれる予定。何日かにまたがる予定と、くり返し（毎週・毎月・毎年）も読む
+       ・今日から30日先まで。手で仕事を入れた日は上書きしない。Diem で消えた休みは、取り込んだ休みだけを外す
+       ・つなぎ先は Diem の公開ページ（../Diem/js/config.js）から読む。合言葉と名前は端末ごとに入れる（tb.diem。送らない）
+       ・読むのは、アプリを開いたとき・表に戻ったとき・予定のページを開いたとき（10分に1回まで）と、設定の「今すぐ読む」 */
+  var KEY_DIEM = 'tb.diem', diemAt = 0, diemBusy = false;
+  function diemConf() { try { return JSON.parse(localStorage.getItem(KEY_DIEM)) || {}; } catch (e) { return {}; } }
+  function diemSave(c) { try { localStorage.setItem(KEY_DIEM, JSON.stringify(c)); } catch (e) {} }
+  function diemOn() { var c = diemConf(); return !!(c.pin && c.me); }
+  function diemUrl(c) {
+    if (c.url) return Promise.resolve(c.url);
+    return fetch('../Diem/js/config.js', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
+      var m = t.match(/syncUrl:\s*'(https:\/\/script\.google\.com\/[^']+\/exec)'/);
+      if (!m) throw new Error('Diem のつなぎ先が見つかりません');
+      return m[1];
+    });
+  }
+  /** その日に、この Diem の予定があるか（Diem の calendar.js と同じ決め方） */
+  function diemOccurs(e, ds) {
+    var r = e.repeat || (e.yearly ? 'year' : '');
+    if (!r) return ds >= e.start && ds <= (e.end || e.start);
+    if (ds < e.start || (e.until && ds > e.until)) return false;
+    if (r === 'week') return Math.round((U.parse(ds) - U.parse(e.start)) / 86400000) % 7 === 0;
+    var y = +ds.slice(0, 4), mo = r === 'month' ? +ds.slice(5, 7) : +e.start.slice(5, 7);
+    var last = new Date(y, mo, 0).getDate();
+    return y + '-' + U.pad(mo) + '-' + U.pad(Math.min(+e.start.slice(8, 10), last)) === ds;
+  }
+  function diemImport(force) {
+    var c = diemConf();
+    if (!diemOn() || diemBusy || (!force && Date.now() - diemAt < 10 * 60000)) return Promise.resolve(null);
+    diemBusy = true; diemAt = Date.now();
+    return diemUrl(c).then(function (u) {
+      return Sync.call(u, { pin: c.pin, action: 'pull', since: 0 });
+    }).then(function (res) {
+      var word = String(c.word || '休み').normalize('NFKC').trim() || '休み', me = String(c.me).trim(), events = [];
+      (res.rows || []).forEach(function (row) {
+        if (row.kind !== 'event' || row.deleted) return;
+        var e;
+        try { e = JSON.parse(row.json); } catch (er) { return; }
+        if (!e || e.deleted || !/^\d{4}-\d\d-\d\d$/.test(e.start || '')) return;
+        if (String(e.title || '').normalize('NFKC').indexOf(word) < 0) return;
+        if (String(e.owner || row.by || '').trim() !== me) return;
+        events.push(e);
+      });
+      var today = U.today(), end = shiftIso(today, 30), days = {}, added = [], removed = 0;
+      for (var i = 0; i <= 30; i++) {
+        var ds = shiftIso(today, i);
+        if (events.some(function (e) { return diemOccurs(e, ds); })) days[ds] = true;
+      }
+      Object.keys(days).forEach(function (ds) {
+        var w = Store.get('work', 'day', 'day-w-' + ds);
+        if (w && !w.deleted) return;                  // 手で入れた日・取り込みずみの日は、そのまま
+        Store.put('work', 'day', { id: 'day-w-' + ds, type: 'work', date: ds, off: true, place: '', shift: '', start: '', end: '',
+                                   from: 'diem', text: '仕事 休み（Diem）', createdAt: Date.now() });
+        added.push(ds);
+      });
+      Store.list('work', 'day').forEach(function (w) {
+        if (w.type === 'work' && w.from === 'diem' && w.date >= today && w.date <= end && !days[w.date]) { Store.remove('work', 'day', w.id); removed++; }
+      });
+      added.forEach(function (ds) { applyPlan(ds, { quiet: true }); });   // 休みになった日を組む
+      c = diemConf(); c.lastAt = Date.now(); c.lastN = Object.keys(days).length; c.err = ''; diemSave(c);
+      diemBusy = false;
+      if (added.length || removed) {
+        renderAll();
+        toast('Diem の休みを取り込みました（' + (added.length ? added.length + '日を休みにして組みました' : '') + (removed ? (added.length ? '・' : '') + removed + '日を外しました' : '') + '）');
+      } else if (view === 'set') renderSettings();
+      return { days: Object.keys(days).length, added: added.length, removed: removed };
+    }).catch(function (e) {
+      diemBusy = false;
+      c = diemConf(); c.err = e.message || String(e); c.lastAt = Date.now(); diemSave(c);
+      if (view === 'set') renderSettings();
+      if (force) throw e;
+      return null;
+    });
+  }
+
+  /** 設定：Diem とつなぐ（合言葉・自分の名前・休みの言葉。この端末だけ） */
+  function diemConnect() {
+    var c = diemConf();
+    modal('<h2>Diem の休みを読む</h2>'
+      + '<div class="hint">Diem に「休み」の予定を入れると、その日を仕事の休みにして、その日を自動で組みます。Diem には何も書きません。<br>'
+      + '★Diem で「2人で共有」にした予定だけが読めます（「自分だけ」の予定は、Diem の外に出ないため）。</div>'
+      + '<div class="f"><label for="dm-pin">Diem の合言葉</label><input type="text" id="dm-pin" autocapitalize="off" autocorrect="off" spellcheck="false" value="' + U.esc(c.pin || '') + '"></div>'
+      + '<div class="f"><label for="dm-me">Diem での自分の名前（Diem の設定の「自分の名前」と同じに）</label><input type="text" id="dm-me" value="' + U.esc(c.me || '') + '"></div>'
+      + '<div class="f"><label for="dm-word">休みの予定の言葉（題にこの言葉がふくまれる予定を休みとして読む）</label><input type="text" id="dm-word" value="' + U.esc(c.word || '休み') + '"></div>'
+      + '<details class="f"><summary class="hint">つなぎ先を手で入れる（ふだんは空のまま）</summary><input type="text" id="dm-url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec" value="' + U.esc(c.url || '') + '"></details>'
+      + '<div class="acts">' + (c.pin ? '<button type="button" class="del" id="dm-off">やめる</button>' : '')
+      + '<button type="button" id="dm-cancel">閉じる</button><button type="button" class="go" id="dm-ok">つないで読む</button></div>',
+      function (m) {
+        m.querySelector('#dm-cancel').onclick = closeModal;
+        if (c.pin) m.querySelector('#dm-off').onclick = function () {
+          if (!global.confirm('Diem の休みを読むのをやめます（取り込んだ休みの日は、そのまま残ります）')) return;
+          localStorage.removeItem(KEY_DIEM); closeModal(); renderAll(); toast('Diem を読むのをやめました');
+        };
+        m.querySelector('#dm-ok').onclick = function () {
+          var n = { pin: m.querySelector('#dm-pin').value.trim(), me: m.querySelector('#dm-me').value.trim(),
+                    word: m.querySelector('#dm-word').value.trim() || '休み', url: m.querySelector('#dm-url').value.trim() };
+          if (!n.pin || !n.me) { toast('合言葉と自分の名前を入れてください'); return; }
+          if (n.url && !/^https:\/\/script\.google\.com\/.+\/exec$/.test(n.url)) { toast('つなぎ先は https://script.google.com/…/exec の形です'); return; }
+          diemSave(n);
+          var btn = this; btn.disabled = true; btn.textContent = '読んでいます…';
+          diemImport(true).then(function (r) {
+            closeModal(); renderAll();
+            toast('Diem とつなぎました（30日先までの休み ' + (r ? r.days : 0) + '日）');
+          }).catch(function (e) {
+            btn.disabled = false; btn.textContent = 'つないで読む';
+            global.alert('Diem を読めませんでした：\n' + (e.message || e));
+          });
+        };
       });
   }
 
@@ -2293,6 +2538,17 @@
       + '<div class="note" style="margin-top:6px">受け口は1つです。個人と会社は、受け口のシートの中で別々のタブに入ります。</div>'
       + '</div>';
 
+    var dc = diemConf();
+    h += '<div class="secttl">Diem の休み</div><div class="card">'
+      + '<div class="setrow"><div><div class="k">Diem の「休み」を読む</div><div class="d">'
+      + (diemOn()
+          ? '読んでいます（名前「' + U.esc(dc.me) + '」・言葉「' + U.esc(dc.word || '休み') + '」）'
+            + (dc.lastAt ? '<br>最後に読んだ時刻 ' + U.esc(U.stamp(dc.lastAt)) + (dc.err ? '・<span style="color:var(--danger)">' + U.esc(dc.err) + '</span>' : '・30日先までの休み ' + (dc.lastN || 0) + '日') : '')
+          : 'つないでいません。Diem に入れた休みの日を、仕事の休みにして自動で組みます')
+      + '</div></div><div style="display:flex;gap:6px">'
+      + (diemOn() ? '<button type="button" class="mini" id="s-diemnow">今すぐ読む</button>' : '')
+      + '<button type="button" class="mini" id="s-diem">' + (diemOn() ? '直す' : 'つなぐ') + '</button></div></div></div>';
+
     h += '<div class="secttl">いまの数</div><div class="card">';
     Store.SPACES.forEach(function (sp) {
       var all = Store.list(sp, 'task');
@@ -2330,6 +2586,13 @@
 
     body.querySelector('#s-back').onclick = function () { show(lastView); };
     body.querySelector('#s-conn').onclick = connect;
+    body.querySelector('#s-diem').onclick = diemConnect;
+    var dn = body.querySelector('#s-diemnow');
+    if (dn) dn.onclick = function () {
+      toast('Diem を読んでいます…');
+      diemImport(true).then(function (r) { if (r && !r.added && !r.removed) toast('変わりはありません（30日先までの休み ' + r.days + '日）'); renderAll(); })
+        .catch(function (e) { global.alert('Diem を読めませんでした：\n' + (e.message || e)); });
+    };
     body.querySelector('#s-sync').onclick = function () {
       if (!Sync.enabled()) { connect(); return; }
       toast('同期しています…');
@@ -2541,9 +2804,13 @@
       var pIso = planDate || U.today();
       if (b.dataset.act === 'pwork') { editWork(pIso); return; }
       if (b.dataset.act === 'pconf') { editPlanConf(); return; }
-      if (b.dataset.act === 'pauto') { planDraft = { iso: pIso, r: autoPlan(pIso) }; renderPlan(); toast('案を作りました（まだ何も書いていません）'); return; }
-      if (b.dataset.act === 'pdraftclose') { planDraft = null; renderPlan(); return; }
-      if (b.dataset.act === 'papply') { applyDraft(); return; }
+      if (b.dataset.act === 'pauto') { applyPlan(pIso, { label: '組みました' }); return; }
+      if (b.dataset.act === 'pclockout') { clockOut(pIso); return; }
+      if (b.dataset.act === 'pclockback') {
+        var wc = workOf(pIso);
+        if (wc && wc.clockOut) { delete wc.clockOut; Store.put('work', 'day', wc); renderAll(); toast('退勤を取り消しました'); }
+        return;
+      }
       var row = b.closest('[data-id]');
       if (!row) return;
       var sp = row.dataset.sp, id = row.dataset.id, t = Store.get(sp, 'task', id);
@@ -2686,6 +2953,8 @@
     show(Store.ui().view);
     Sync.start();
     checkVersion(true);
+    diemImport(false);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) diemImport(false); });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
