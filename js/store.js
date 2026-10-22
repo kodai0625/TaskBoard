@@ -25,7 +25,11 @@
   var SPACES = ['personal', 'work'];
   var KINDS = ['task', 'memo'];
   var APP_SPACE = 'personal', APP_PREFIX = 'app-', KEY_APPS = 'tb.apps';
-  var BUY_PREFIX = 'buy-';
+  /* memo の入れ物に同居する種類と、その id の頭（受け口の GAS が task と memo しか受けないため）。
+       buy … 買い出し（2026-10-13）
+       day … その日の仕事の時間（予定のページの「自動で組む」の材料。2026-10-23）
+     どれも印は src と id の頭。メモの一覧（list(…,'memo')）には出さない */
+  var SUB_PREFIX = { buy: 'buy-', day: 'day-' };
   var KEY_UI = 'tb.ui';
 
   var bags = {};      // { personal: {task:{}, memo:{}, outbox:[]}, work: {...} }
@@ -92,8 +96,14 @@
   /* 自作アプリの一覧の印（最初の版が memo の入れ物に入れたもの。いまは tb.apps に置く） */
   function isApp(r) { return !!r && (r.src === 'app' || String(r.id || '').indexOf(APP_PREFIX) === 0); }
   /* 買い出しリストは memo の入れ物に同居している（上の説明）。'buy' と言われたら memo の入れ物を見る */
-  function isBuy(r) { return !!r && (r.src === 'buy' || String(r.id || '').indexOf(BUY_PREFIX) === 0); }
-  function bagOf(kind) { return kind === 'buy' ? 'memo' : kind; }
+  function subKind(r) {
+    if (!r) return '';
+    if (SUB_PREFIX.hasOwnProperty(r.src)) return r.src;
+    var id = String(r.id || '');
+    for (var k in SUB_PREFIX) if (SUB_PREFIX.hasOwnProperty(k) && id.indexOf(SUB_PREFIX[k]) === 0) return k;
+    return '';
+  }
+  function bagOf(kind) { return SUB_PREFIX.hasOwnProperty(kind) ? 'memo' : kind; }
 
   function checkApp(space) {
     if (space !== APP_SPACE) throw new Error('自作アプリの一覧は個人の側だけです');
@@ -154,7 +164,7 @@
       if (kind === 'app') { checkApp(space); return Object.keys(apps).map(function (id) { return apps[id]; }); }
       var m = bags[space][bagOf(kind)] || {};
       return Object.keys(m).map(function (id) { return m[id]; })
-        .filter(function (r) { return !r.deleted && !isApp(r) && isBuy(r) === (kind === 'buy'); });
+        .filter(function (r) { return !r.deleted && !isApp(r) && subKind(r) === (SUB_PREFIX.hasOwnProperty(kind) ? kind : ''); });
     },
 
     get: function (space, kind, id) {
@@ -168,8 +178,8 @@
       check(space);
       var now = Date.now();
       if (kind === 'app') { checkApp(space); Store.putApps([rec]); return rec; }
-      if (kind === 'buy') rec.src = 'buy';
-      if (!rec.id) { rec.id = (kind === 'buy' ? BUY_PREFIX : '') + newId(); rec.createdAt = now; }
+      if (SUB_PREFIX.hasOwnProperty(kind)) rec.src = kind;
+      if (!rec.id) { rec.id = (SUB_PREFIX[kind] || '') + newId(); rec.createdAt = now; }
       rec.updatedAt = now;
       bags[space][bagOf(kind)][rec.id] = rec;
       queue(space, bagOf(kind), rec.id);

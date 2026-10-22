@@ -813,8 +813,277 @@
       + '</button>';
   }
 
+  /* ---------- 自動で組む（2026-10-23 ko-dai さんの願い） ----------
+     その日の仕事の時間と予定から、何時に起きて何時に寝るか、時刻の無いタスクをいつやるかの「案」を作る。
+     ★案は見せるだけ。「この案で決める」を押したときだけ、タスクに時刻とやる日を書く（習慣の時刻は変えない）
+       ・仕事の時間は、その日ごとに入れる（ko-dai さんの決定）。会社の側の記録（day-w-日付）として同期する。
+         記録は memo の入れ物に同居（src:'day'）。メモの一覧にも Obsidian にも出さない
+       ・起きる：「いつもの起きる時刻」と「前の晩に寝た時刻＋睡眠」の遅いほう。ただし、その日の最初の予定（仕事を含む）の
+         「支度の時間」前までには起きる（間に合わないと、睡眠が足りないと出す）
+       ・寝る：次の日の起きる時刻から睡眠の時間を引いた時刻。ただし、その日の最後の予定の後の「寝る前のゆとり」より前にはしない
+       ・入れるもの：やる日・期限がその日（と過ぎたもの）・その日の習慣が先。時間が余れば、期限が3日以内のものと重要度 高のもの
+         （やる日が先の日に決まっているものは入れない）。重要度 → 期限の近さの順に、空いている一番早い時間へ
+       ・会社のタスクは仕事の時間の中の空きへ、個人のタスクは仕事の前後と休みの日へ（ko-dai さんの決定）
+       ・夜中の0時を越える時刻には入れない（時刻はその日の中だけで持つため）
+       ・組み方の数（睡眠7時間など）は、この端末の画面の覚え（tb.ui の planConf） */
+  var planDraft = null;              // { iso, r }：見せている案
+  var PLAN_DEF = { sleepH: 7, prepMin: 60, windMin: 30, gapMin: 10, wake: '07:00' };
+
+  function planConf() {
+    var u = Store.ui(), c = u.planConf || {};
+    var out = {};
+    Object.keys(PLAN_DEF).forEach(function (k) { out[k] = c[k] != null && c[k] !== '' ? c[k] : PLAN_DEF[k]; });
+    out.sleepH = Math.max(3, Math.min(12, Number(out.sleepH) || 7));
+    ['prepMin', 'windMin', 'gapMin'].forEach(function (k) { out[k] = Math.max(0, Math.min(240, Number(out[k]) || 0)); });
+    if (!/^\d\d:\d\d$/.test(out.wake)) out.wake = PLAN_DEF.wake;
+    return out;
+  }
+  function shiftIso(iso, n) { var d = U.parse(iso); d.setDate(d.getDate() + n); return U.iso(d); }
+  function workOf(iso) { var r = Store.get('work', 'day', 'day-w-' + iso); return r && !r.deleted ? r : null; }
+  /** 仕事の時間（分。終わりが始まりより前なら次の日まで＝1440を越える）。休み・未入力は null */
+  function workSpan(iso) {
+    var w = workOf(iso);
+    if (!w || w.off || !w.start || !w.end) return null;
+    var s = toMin(w.start), e = toMin(w.end);
+    if (e <= s) e += 1440;
+    return { s: s, e: e };
+  }
+  /** その日の動かせない予定（時刻のあるタスク・習慣と、仕事）。済みのものも時間はふさがっているとみなす */
+  function fixedOf(iso) {
+    var out = [];
+    planItems(iso).forEach(function (x) {
+      if (x.t.time) { var s = toMin(x.t.time); out.push({ s: s, e: s + durOf(x.t) }); }
+    });
+    var w = workSpan(iso);
+    if (w) out.push(w);
+    return out.sort(function (a, b) { return a.s - b.s; });
+  }
+  function lastEnd(fixed) { return fixed.reduce(function (m, f) { return Math.max(m, f.e); }, -1); }
+  /** 起きる時刻（その日の0時からの分） */
+  function wakeAt(iso, c) {
+    var f = fixedOf(iso), prev = fixedOf(shiftIso(iso, -1));
+    var w = toMin(c.wake);
+    var pe = lastEnd(prev);
+    if (pe >= 0) w = Math.max(w, pe + c.windMin + c.sleepH * 60 - 1440);   // 前の晩が遅ければ、寝坊してよい
+    if (f.length) w = Math.min(w, f[0].s - c.prepMin);                        // 最初の予定には間に合わせる
+    return Math.max(0, w);
+  }
+
+  function snap(m) { return Math.ceil(m / 5) * 5; }
+  /** 窓 [s,e) の並びから、ふさがり [s,e) を切り取る */
+  function cut(wins, busy) {
+    var out = [];
+    wins.forEach(function (w) {
+      var parts = [w];
+      busy.forEach(function (b) {
+        var next = [];
+        parts.forEach(function (p) {
+          if (b.e <= p.s || b.s >= p.e) { next.push(p); return; }
+          if (b.s > p.s) next.push({ s: p.s, e: b.s });
+          if (b.e < p.e) next.push({ s: b.e, e: p.e });
+        });
+        parts = next;
+      });
+      out = out.concat(parts);
+    });
+    return out.filter(function (w) { return w.e - w.s >= 5; });
+  }
+
+  /** 案を作る。返すのは { wake, bed, sleep, short, work, workSet, placed:[{sp,t,habit,s,e}], left:[{sp,t,why}] } */
+  function autoPlan(iso) {
+    var c = planConf(), fixed = fixedOf(iso), work = workSpan(iso);
+    var wake = wakeAt(iso, c), nextWake = wakeAt(shiftIso(iso, 1), c) + 1440;
+    var le = lastEnd(fixed);
+    var bed = nextWake - c.sleepH * 60, short = false;
+    if (le >= 0 && bed < le + c.windMin) { bed = le + c.windMin; short = true; }
+    if (bed < wake + c.prepMin + 60) bed = wake + c.prepMin + 60;
+    var first = fixed.length ? fixed[0].s : null;
+    if (first != null && wake > first - c.prepMin) short = true;
+    var sleep = nextWake - bed;
+    if (sleep < c.sleepH * 60) short = true;
+
+    // 空いている時間：起きて支度したあと〜寝る前のゆとりの前（0時まで）から、予定（前後のすき間つき）を切り取る
+    var dayWin = [{ s: snap(wake + c.prepMin), e: Math.min(1440, bed - c.windMin) }];
+    var busyTasks = [];
+    planItems(iso).forEach(function (x) {
+      if (x.t.time) { var s = toMin(x.t.time); busyTasks.push({ s: s - c.gapMin, e: s + durOf(x.t) + c.gapMin }); }
+    });
+    // 個人のタスクは、仕事の前後にもすき間をあける（行き帰り・切りかえ）
+    var own = cut(cut(dayWin, busyTasks), work ? [{ s: work.s - c.gapMin, e: work.e + c.gapMin }] : []);
+    var inWork = work ? cut(cut(dayWin, busyTasks), [{ s: -1e9, e: work.s }, { s: work.e, e: 1e9 }]) : [];
+
+    // 入れる候補
+    var soon = shiftIso(iso, 3), cands = [];
+    Store.SPACES.forEach(function (sp) {
+      Store.list(sp, 'task').forEach(function (t) {
+        if (isDev(t) || t.time) return;                           // 時刻のあるものは、もう予定（動かさない）
+        if (isHabit(t)) { if (onDay(t, iso) && !habitDone(t, iso)) cands.push({ sp: sp, t: t, habit: true, tier: 0 }); return; }
+        if (t.done || (t.doOn && t.doOn > iso)) return;           // やる日が先に決まっているものは前倒ししない
+        var today = (t.doOn && t.doOn <= iso) || (t.due && t.due <= iso);
+        var rush = (t.due && t.due <= soon) || prioOf(t) === 'high';
+        if (today) cands.push({ sp: sp, t: t, habit: false, tier: 0 });
+        else if (rush) cands.push({ sp: sp, t: t, habit: false, tier: 1 });
+      });
+    });
+    cands.sort(function (a, b) {
+      var oa = a.t.due && a.t.due < iso ? 0 : 1, ob = b.t.due && b.t.due < iso ? 0 : 1;
+      return a.tier - b.tier || oa - ob || PRIO[prioOf(a.t)].rank - PRIO[prioOf(b.t)].rank
+        || (a.t.due || '9999') .localeCompare(b.t.due || '9999') || (a.t.createdAt || 0) - (b.t.createdAt || 0);
+    });
+
+    var placed = [], left = [];
+    cands.forEach(function (x) {
+      var wins = x.sp === 'work' ? inWork : own, d = durOf(x.t);
+      if (x.sp === 'work' && !work) {
+        if (x.tier === 0) left.push({ sp: x.sp, t: x.t, why: workOf(iso) ? 'この日は仕事が休み' : 'この日の仕事の時間が入っていない' });
+        return;
+      }
+      for (var i = 0; i < wins.length; i++) {
+        var s = snap(wins[i].s);
+        if (wins[i].e - s >= d) {
+          placed.push({ sp: x.sp, t: x.t, habit: x.habit, s: s, e: s + d });
+          var rest = [];
+          if (s - wins[i].s >= 5) rest.push({ s: wins[i].s, e: s });
+          if (wins[i].e - (s + d + c.gapMin) >= 5) rest.push({ s: s + d + c.gapMin, e: wins[i].e });
+          wins.splice.apply(wins, [i, 1].concat(rest));
+          return;
+        }
+      }
+      if (x.tier === 0) left.push({ sp: x.sp, t: x.t, why: x.sp === 'work' ? '仕事の時間に空きが足りない' : '空いている時間が足りない' });
+    });
+    return { wake: wake, bed: bed, sleep: sleep, short: short, work: work, workSet: !!workOf(iso), placed: placed, left: left };
+  }
+
+  function clock(m) { m = ((m % 1440) + 1440) % 1440; return Math.floor(m / 60) + ':' + U.pad(m % 60); }
+  function hoursLabel(m) { var h = Math.floor(m / 60), r = m % 60; return h + '時間' + (r ? r + '分' : ''); }
+
+  /** 案のとおりに、タスクへ時刻とやる日を書く（習慣は変えない）。「もどす」で前の値に戻せる */
+  function applyDraft() {
+    if (!planDraft) return;
+    var iso = planDraft.iso, back = [], n = 0, habits = 0;
+    planDraft.r.placed.forEach(function (p) {
+      if (p.habit) { habits++; return; }
+      var t = Store.get(p.sp, 'task', p.t.id);
+      if (!t || t.deleted || t.done || t.time) return;      // 案を作ったあとに変わったものは触らない
+      back.push({ sp: p.sp, id: t.id, time: t.time || '', dur: t.dur, doOn: t.doOn || '' });
+      t.time = fromMin(p.s); t.dur = p.e - p.s; t.doOn = iso;
+      Store.put(p.sp, 'task', t);
+      n++;
+    });
+    planDraft = null;
+    renderAll();
+    toast(n + '件の時刻を決めました' + (habits ? '（習慣の時刻は変えていません）' : ''), function () {
+      back.forEach(function (b) {
+        var t = Store.get(b.sp, 'task', b.id);
+        if (!t) return;
+        t.time = b.time; t.dur = b.dur; t.doOn = b.doOn;
+        if (t.dur == null) delete t.dur;
+        Store.put(b.sp, 'task', t);
+      });
+      renderAll();
+    });
+  }
+
+  /** その日の仕事の時間を入れる（会社の側の記録として同期する） */
+  function editWork(iso) {
+    var w = workOf(iso), prev = null;
+    for (var i = 1; i <= 14 && !prev; i++) { var p = workOf(shiftIso(iso, -i)); if (p && !p.off && p.start) prev = p; }
+    var off = !!(w && w.off);
+    var start = (w && w.start) || (prev && prev.start) || '10:00', end = (w && w.end) || (prev && prev.end) || '22:00';
+    var d = U.parse(iso);
+    modal('<h2>' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + DOW[d.getDay()] + '）の仕事</h2>'
+      + '<div class="f"><div class="seg3" id="wk-off"><button type="button" data-off="0"' + (off ? '' : ' class="on"') + '>仕事あり</button>'
+      + '<button type="button" data-off="1"' + (off ? ' class="on"' : '') + '>休み</button></div></div>'
+      + '<div class="f" id="wk-times"' + (off ? ' hidden' : '') + '><label>始まり と 終わり</label><div class="f2">'
+      + '<input type="time" id="wk-s" step="300" value="' + start + '"><input type="time" id="wk-e" step="300" value="' + end + '"></div>'
+      + '<div class="hint" style="margin-top:6px">終わりが始まりより前なら、次の日の朝までの仕事として組みます</div></div>'
+      + (prev && !w ? '<div class="hint">前に入れた日（' + U.md(prev.date) + '）と同じ時間を出しています</div>' : '')
+      + '<div class="acts">' + (w ? '<button type="button" class="del" id="wk-del">消す</button>' : '')
+      + '<button type="button" id="wk-cancel">やめる</button><button type="button" class="go" id="wk-ok">決める</button></div>',
+      function (m) {
+        m.querySelectorAll('#wk-off [data-off]').forEach(function (b) {
+          b.onclick = function () {
+            m.querySelectorAll('#wk-off [data-off]').forEach(function (x) { x.classList.toggle('on', x === b); });
+            m.querySelector('#wk-times').hidden = b.dataset.off === '1';
+          };
+        });
+        m.querySelector('#wk-cancel').onclick = closeModal;
+        if (w) m.querySelector('#wk-del').onclick = function () { Store.remove('work', 'day', w.id); planDraft = null; closeModal(); renderAll(); };
+        m.querySelector('#wk-ok').onclick = function () {
+          var isOff = m.querySelector('#wk-off .on').dataset.off === '1';
+          var s = m.querySelector('#wk-s').value, e = m.querySelector('#wk-e').value;
+          if (!isOff && (!s || !e)) { toast('始まりと終わりを入れてください'); return; }
+          if (!isOff && s === e) { toast('始まりと終わりが同じです'); return; }
+          var rec = w || { id: 'day-w-' + iso, type: 'work', date: iso, createdAt: Date.now() };
+          rec.off = isOff; rec.start = isOff ? '' : s; rec.end = isOff ? '' : e;
+          rec.text = isOff ? '仕事 休み' : '仕事 ' + s + '〜' + e;
+          Store.put('work', 'day', rec);
+          planDraft = null;
+          closeModal(); renderAll();
+        };
+      });
+  }
+
+  /** 組み方の数（この端末だけ） */
+  function editPlanConf() {
+    var c = planConf();
+    modal('<h2>自動で組むときの決まり</h2>'
+      + '<div class="f"><label for="pc-sleep">睡眠の時間（時間）</label><input type="text" inputmode="decimal" id="pc-sleep" value="' + c.sleepH + '"></div>'
+      + '<div class="f"><label for="pc-wake">予定が遅い日・無い日に起きる時刻</label><input type="time" id="pc-wake" step="300" value="' + c.wake + '"></div>'
+      + '<div class="f"><label for="pc-prep">起きてから動き出すまで（分）</label><input type="text" inputmode="numeric" id="pc-prep" value="' + c.prepMin + '"></div>'
+      + '<div class="f"><label for="pc-wind">寝る前のゆとり（分）</label><input type="text" inputmode="numeric" id="pc-wind" value="' + c.windMin + '"></div>'
+      + '<div class="f"><label for="pc-gap">予定と予定のあいだ（分）</label><input type="text" inputmode="numeric" id="pc-gap" value="' + c.gapMin + '"></div>'
+      + '<div class="hint">この端末だけの決まりです。タスクの長さは、タスクの「時刻と長さ」（無ければ30分）を使います。</div>'
+      + '<div class="acts"><button type="button" id="pc-reset">はじめの値</button><button type="button" id="pc-cancel">やめる</button><button type="button" class="go" id="pc-ok">決める</button></div>',
+      function (m) {
+        m.querySelector('#pc-cancel').onclick = closeModal;
+        m.querySelector('#pc-reset').onclick = function () { delete Store.ui().planConf; Store.saveUi(); planDraft = null; closeModal(); renderAll(); };
+        m.querySelector('#pc-ok').onclick = function () {
+          var num = function (id) { return Number(String(m.querySelector(id).value).normalize('NFKC')); };
+          Store.ui().planConf = { sleepH: num('#pc-sleep'), wake: m.querySelector('#pc-wake').value, prepMin: num('#pc-prep'), windMin: num('#pc-wind'), gapMin: num('#pc-gap') };
+          Store.saveUi();
+          planDraft = null;
+          closeModal(); renderAll();
+        };
+      });
+  }
+
+  /** 予定のページの上の「その日の組み立て」 */
+  function planHead(iso, r) {
+    var w = workOf(iso), c = planConf();
+    var work = !w ? '<span class="pk">仕事</span><span class="pv dim">まだ入れていません</span><button type="button" class="mini" data-act="pwork">入れる</button>'
+      : w.off ? '<span class="pk">仕事</span><span class="pv">休み</span><button type="button" class="mini" data-act="pwork">直す</button>'
+      : '<span class="pk">仕事</span><span class="pv"><b>' + U.esc(w.start) + '〜' + U.esc(w.end) + '</b>' + (toMin(w.end) <= toMin(w.start) ? '（次の日まで）' : '') + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
+    var sleep = '<span class="pk">睡眠</span><span class="pv">起きる <b>' + clock(r.wake) + '</b>・寝る <b>' + clock(r.bed) + '</b>'
+      + '<small>（' + hoursLabel(r.sleep) + (r.short ? '・<em>目標の' + c.sleepH + '時間に足りません</em>' : '') + '）</small></span>';
+    var h = '<div class="card planhead">'
+      + '<div class="prow">' + work + '</div>'
+      + '<div class="prow">' + sleep + '</div>'
+      + '<div class="pacts"><button type="button" class="mini go2" data-act="pauto">✦ 自動で組む</button>'
+      + '<button type="button" class="linkbtn" data-act="pconf">組み方の決まり</button></div></div>';
+    if (planDraft && planDraft.iso === iso) {
+      var d = planDraft.r, tasks = d.placed.filter(function (p) { return !p.habit; }).length;
+      h += '<div class="card plandraft"><div class="pdt">✦ 自動で組んだ案</div>'
+        + '<div class="pds">起きる ' + clock(d.wake) + '・寝る ' + clock(d.bed) + '／入れた ' + d.placed.length + '件'
+        + (d.left.length ? '・入らなかった ' + d.left.length + '件' : '') + '</div>'
+        + (d.placed.length ? '<ol class="pdl">' + d.placed.slice().sort(function (a, b) { return a.s - b.s; }).map(function (p) {
+            return '<li><span class="pdtime">' + fromMin(p.s) + '〜' + fromMin(p.e) + '</span><span class="sptag ' + p.sp + '">' + label(p.sp) + '</span>'
+              + U.esc(p.t.title) + (p.habit ? ' <small>↻習慣</small>' : '') + '</li>';
+          }).join('') + '</ol>' : '<div class="hint">入れられるタスクがありませんでした。</div>')
+        + (d.left.length ? '<div class="pdleft"><b>入らなかったもの</b>' + d.left.map(function (x) {
+            return '<div>・' + U.esc(x.t.title) + '<small>（' + label(x.sp) + '・' + U.esc(x.why) + '）</small></div>';
+          }).join('') + '</div>' : '')
+        + '<div class="acts"><button type="button" data-act="pdraftclose">やめる</button>'
+        + '<button type="button" class="go" data-act="papply"' + (tasks ? '' : ' disabled') + '>この案で決める（' + tasks + '件）</button></div>'
+        + '<div class="hint" style="margin:8px 0 0">決めると、タスクに時刻とやる日が入ります（「もどす」で戻せます）。習慣の時刻は変えません。</div></div>';
+    }
+    return h;
+  }
+
   function renderPlan() {
     var iso = planDate || U.today();
+    if (planDraft && planDraft.iso !== iso) planDraft = null;     // 日を動かしたら、案はしまう
+    var auto = autoPlan(iso), draft = planDraft && planDraft.iso === iso ? planDraft.r : null;
     var d = U.parse(iso), today = U.today();
     var diff = U.daysFrom(iso);
     document.getElementById('planDate').innerHTML = '<b>' + (d.getMonth() + 1) + '月' + d.getDate() + '日</b>（' + DOW[d.getDay()] + '）'
@@ -828,7 +1097,7 @@
     });
     layout(timed);
 
-    var h = '';
+    var h = planHead(iso, auto);
     // 数の帯
     var doneN = all.filter(function (x) { return x.done; }).length;
     h += '<div class="plansum">' + (all.length
@@ -854,6 +1123,10 @@
     // タイムテーブル
     var startH = 7, endH = 22;
     timed.forEach(function (x) { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.ceil(x.e / 60)); });
+    startH = Math.min(startH, Math.floor(auto.wake / 60));
+    if (auto.bed < 1440) endH = Math.max(endH, Math.ceil(auto.bed / 60));
+    if (auto.work) { startH = Math.min(startH, Math.floor(auto.work.s / 60)); endH = Math.max(endH, Math.ceil(Math.min(1440, auto.work.e) / 60)); }
+    if (draft) draft.placed.forEach(function (p) { startH = Math.min(startH, Math.floor(p.s / 60)); endH = Math.max(endH, Math.ceil(p.e / 60)); });
     if (iso === today) {
       var nowM = new Date().getHours() * 60 + new Date().getMinutes();
       startH = Math.min(startH, Math.floor(nowM / 60)); endH = Math.max(endH, Math.ceil((nowM + 1) / 60));
@@ -865,6 +1138,19 @@
       h += '<button type="button" class="slot" data-act="slot" data-h="' + hr + '" style="top:' + px(hr * 60) + 'px;height:' + HOUR + 'px" aria-label="' + hr + '時に足す">'
         + '<span class="hl">' + hr + ':00</span></button>';
     }
+    // 仕事の時間の帯・起きる／寝るの線・案（点線の枠。押しても何も起きない）
+    if (auto.work) {
+      var ws = Math.max(auto.work.s, startH * 60), we = Math.min(auto.work.e, endH * 60);
+      if (we > ws) h += '<div class="workband" style="top:' + px(ws) + 'px;height:' + (px(we) - px(ws)) + 'px"></div>'
+        + '<div class="worklabel" style="top:' + (px(ws) + 2) + 'px">仕事 ' + clock(auto.work.s) + '〜' + clock(auto.work.e) + '</div>';
+    }
+    if (auto.wake >= startH * 60) h += '<div class="sleepline wake" style="top:' + px(auto.wake) + 'px"><span>起きる ' + clock(auto.wake) + '</span></div>';
+    if (auto.bed < endH * 60) h += '<div class="sleepline bed" style="top:' + px(auto.bed) + 'px"><span>寝る ' + clock(auto.bed) + '</span></div>';
+    if (draft) draft.placed.forEach(function (p) {
+      var top = px(p.s), height = Math.max(22, px(p.e) - top - 2);
+      h += '<div class="ev draft ' + p.sp + '" style="top:' + top + 'px;height:' + height + 'px;left:46px;width:calc(100% - 52px)">'
+        + '<span class="evbody"><span class="evt">案：' + U.esc(p.t.title) + '</span><span class="evs">' + fromMin(p.s) + '〜' + fromMin(p.e) + (p.habit ? ' ・↻' : '') + '</span></span></div>';
+    });
     timed.forEach(function (x) {
       var top = px(x.s), height = Math.max(24, px(x.e) - top - 2);
       var w = 100 / x.n;
@@ -2252,6 +2538,12 @@
       var b = e.target.closest('[data-act]');
       if (!b) return;
       if (b.dataset.act === 'slot') { addAtSlot(+b.dataset.h); return; }
+      var pIso = planDate || U.today();
+      if (b.dataset.act === 'pwork') { editWork(pIso); return; }
+      if (b.dataset.act === 'pconf') { editPlanConf(); return; }
+      if (b.dataset.act === 'pauto') { planDraft = { iso: pIso, r: autoPlan(pIso) }; renderPlan(); toast('案を作りました（まだ何も書いていません）'); return; }
+      if (b.dataset.act === 'pdraftclose') { planDraft = null; renderPlan(); return; }
+      if (b.dataset.act === 'papply') { applyDraft(); return; }
       var row = b.closest('[data-id]');
       if (!row) return;
       var sp = row.dataset.sp, id = row.dataset.id, t = Store.get(sp, 'task', id);
