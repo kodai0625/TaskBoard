@@ -622,3 +622,19 @@ a.alink .aname::after{content:" ↗"; color:var(--gold); font-weight:400; font-s
 .tvchips .chip.on{background:var(--accent); border-color:var(--accent); color:var(--on); font-weight:700}
 .tvpanel .linkbtn{align-self:flex-end}
 .tvnote{font-size:12px; color:var(--dim); margin:0 4px 8px}
+
+/* 会議の議題（会社の側のメモのページ。2026-10-28） */
+.agenda{border-top:3px solid var(--c-work); padding:10px 10px 6px; margin-bottom:12px}
+.agh{display:flex; align-items:baseline; gap:8px; margin:0 2px 8px}
+.agt{font-size:14.5px; font-weight:700}
+.agt::before{content:"✦ "; color:var(--gold)}
+.agn{font-size:12px; color:var(--dim)}
+.agadd{display:flex; gap:8px; margin-bottom:6px}
+.agadd input{flex:1; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink); font-size:16px}
+.agadd input:focus{outline:2px solid var(--accent); outline-offset:-1px}
+.agadd .addgo{width:42px}
+.aglist{border-top:1px solid var(--line)}
+.trow.ag::before{background:var(--c-work); opacity:.6}
+.trow.ag.done::before{background:transparent}
+.agempty{font-size:12.5px; color:var(--dim); padding:8px 4px 6px}
+.agenda .donehead{padding-top:8px}

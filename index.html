@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=ae1845f6">
+<link rel="stylesheet" href="css/style.css?v=9e0699a8">
 </head>
 <body data-space="personal">
 
@@ -153,6 +153,15 @@
 
   <!-- ============ メモ ============ -->
   <section id="view-memo" class="view">
+    <!-- 会議の議題（会社の側だけ）。メモの1つとして持つ（agenda） -->
+    <section class="card agenda" id="agendaBox" hidden>
+      <div class="agh"><span class="agt">会議の議題</span><span class="agn" id="agendaCount"></span></div>
+      <form class="agadd" id="agendaForm" autocomplete="off">
+        <input type="text" id="agendaInput" maxlength="300" enterkeyhint="done" aria-label="会議の議題を足す" placeholder="会議で挙げたいことを書く">
+        <button type="submit" class="addgo" aria-label="足す">＋</button>
+      </form>
+      <div id="agendaList"></div>
+    </section>
     <form class="memoadd" id="memoForm" autocomplete="off">
       <textarea id="memoInput" rows="2" maxlength="10000" aria-label="メモを書く"></textarea>
       <button type="submit" class="mini go">残す</button>
@@ -242,11 +251,11 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=ae1845f6"></script>
-<script src="js/store.js?v=ae1845f6"></script>
-<script src="js/sync.js?v=ae1845f6"></script>
-<script src="js/lock.js?v=ae1845f6"></script>
-<script src="js/qr.js?v=ae1845f6"></script>
-<script src="js/app.js?v=ae1845f6"></script>
+<script src="js/config.js?v=9e0699a8"></script>
+<script src="js/store.js?v=9e0699a8"></script>
+<script src="js/sync.js?v=9e0699a8"></script>
+<script src="js/lock.js?v=9e0699a8"></script>
+<script src="js/qr.js?v=9e0699a8"></script>
+<script src="js/app.js?v=9e0699a8"></script>
 </body>
 </html>

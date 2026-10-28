@@ -245,7 +245,7 @@
   /* ---------- 見出しの数 ---------- */
   function paintCounts() {
     var open = Store.list(space(), 'task').filter(function (t) { return !t.done && !isDev(t) && !isHabit(t); }).length;
-    var memos = Store.list(space(), 'memo').length;
+    var memos = Store.list(space(), 'memo').filter(function (m) { return !isAgenda(m) || !m.talked; }).length;
     document.getElementById('cntTask').textContent = open ? open : '';
     document.getElementById('cntMemo').textContent = memos ? memos : '';
     var buy = buyNeedCount();
@@ -1687,8 +1687,95 @@
     el.addEventListener('input', function () { grow(el); });
   }
 
+  /* ---------- 会議の議題（会社の側だけ。2026-10-28 ko-dai さんの願い） ----------
+     会議で挙げたいことを書きためる枠。メモの1つとして持つ（agenda: true）。話したら印を付ける（talked・talkedAt）。
+       ・受け口・同期・Obsidian への書き出しは、ふつうのメモと同じ道（書き出しでは見出しに【会議の議題】と付く）
+       ・行を押すと「話した」（タスクと同じ）。直すのは右の編集ボタン。話したものは下にたたむ
+       ・下のメモの一覧には出さない */
+  var AGSP = 'work', showTalked = false;
+  function isAgenda(m) { return !!(m && m.agenda); }
+
+  function agendaRow(m) {
+    var sub = m.talked
+      ? (m.talkedAt ? U.md(U.iso(new Date(m.talkedAt))) + 'に話した' : '話した')
+      : U.md(U.iso(new Date(m.createdAt || m.updatedAt))) + 'に書いた';
+    return '<div class="trow ag' + (m.talked ? ' done' : '') + '" data-id="' + U.esc(m.id) + '">'
+      + '<button type="button" class="ck" data-act="agtoggle" aria-label="' + (m.talked ? 'まだ話していないにもどす' : '話した') + '">'
+      + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      + '</button>'
+      + '<button type="button" class="tbody" data-act="agtoggle"><span class="ttl">' + U.esc(m.text) + '</span>'
+      + '<span class="sub"><span class="due">' + U.esc(sub) + '</span></span></button>'
+      + editBtn('agedit') + '</div>';
+  }
+
+  function renderAgenda() {
+    var box = document.getElementById('agendaBox');
+    box.hidden = space() !== AGSP;
+    if (box.hidden) return;
+    var all = Store.list(AGSP, 'memo').filter(isAgenda);
+    var open = all.filter(function (m) { return !m.talked; }).sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+    var talked = all.filter(function (m) { return m.talked; }).sort(function (a, b) { return (b.talkedAt || 0) - (a.talkedAt || 0); });
+    document.getElementById('agendaCount').textContent = open.length ? open.length + '件' : '';
+    var h = open.length
+      ? '<div class="aglist">' + open.map(agendaRow).join('') + '</div>'
+      : '<div class="agempty">' + (talked.length ? '挙げたいことは全部話しました' : '会議で挙げたいことを、上に書いておけます') + '</div>';
+    if (talked.length) {
+      h += '<button type="button" class="donehead" data-act="showtalked">' + (showTalked ? '▾' : '▸') + ' 話した議題 ' + talked.length + '件</button>';
+      if (showTalked) {
+        h += '<div class="aglist">' + talked.map(agendaRow).join('') + '</div>'
+          + '<div class="buyfoot"><button type="button" class="mini danger" data-act="agclear">話した議題を片づける</button></div>';
+      }
+    }
+    document.getElementById('agendaList').innerHTML = h;
+  }
+
+  function addAgenda(text) {
+    text = String(text || '').trim();
+    if (!text) return false;
+    if (!confirmWork(text, AGSP)) return false;
+    Store.put(AGSP, 'memo', { text: text, agenda: true, talked: false });
+    renderAll();
+    return true;
+  }
+
+  function toggleAgenda(id) {
+    var m = Store.get(AGSP, 'memo', id);
+    if (!m || !isAgenda(m)) return;
+    var prev = { talked: !!m.talked, at: m.talkedAt || 0 };
+    m.talked = !m.talked;
+    m.talkedAt = m.talked ? Date.now() : 0;
+    Store.put(AGSP, 'memo', m);
+    renderAll();
+    toast(m.talked ? '話したにしました' : 'まだ話していないにもどしました', function () {
+      var cur = Store.get(AGSP, 'memo', id);
+      if (!cur) return;
+      cur.talked = prev.talked; cur.talkedAt = prev.at;
+      Store.put(AGSP, 'memo', cur);
+      renderAll();
+    });
+  }
+
+  function clearTalked() {
+    var talked = Store.list(AGSP, 'memo').filter(function (m) { return isAgenda(m) && m.talked; });
+    if (!talked.length) return;
+    if (!global.confirm('話した議題 ' + talked.length + '件を消します。よろしいですか？')) return;
+    var ids = talked.map(function (m) { return m.id; });
+    ids.forEach(function (id) { Store.remove(AGSP, 'memo', id); });
+    renderAll();
+    toast(ids.length + '件消しました', function () {
+      ids.forEach(function (id) {
+        var cur = Store.get(AGSP, 'memo', id);
+        if (!cur) return;
+        delete cur.deleted;
+        Store.put(AGSP, 'memo', cur);
+      });
+      renderAll();
+    });
+  }
+
   function renderMemos() {
-    var list = Store.list(space(), 'memo')
+    renderAgenda();
+    var list = Store.list(space(), 'memo').filter(function (m) { return !isAgenda(m); })
       .sort(function (a, b) { return b.updatedAt - a.updatedAt; });
     var h = list.length
       ? list.map(function (m) {
@@ -1715,11 +1802,12 @@
     var memo = Store.get(sp, 'memo', id);
     if (!memo) return;
     modal(
-      '<h2>' + U.esc(label(sp)) + 'のメモ</h2>'
+      '<h2>' + (isAgenda(memo) ? '会議の議題' + (memo.talked ? '（話した）' : '') : U.esc(label(sp)) + 'のメモ') + '</h2>'
       + '<div class="f"><textarea id="m-text" rows="8" maxlength="10000">' + U.esc(memo.text) + '</textarea></div>'
       + '<div class="hint">書いた日：' + U.esc(U.stamp(memo.createdAt || memo.updatedAt)) + '</div>'
       + '<div class="acts">'
       + '<button type="button" class="del" id="m-del">消す</button>'
+      + (isAgenda(memo) ? '<button type="button" id="m-plain">ふつうのメモにする</button>' : '')
       + '<button type="button" id="m-task">タスクにする</button>'
       + '<button type="button" class="go" id="m-ok">直す</button>'
       + '</div>',
@@ -1735,6 +1823,13 @@
             Store.put(sp, 'memo', cur);
             renderAll();
           });
+        };
+        var plain = m.querySelector('#m-plain');
+        if (plain) plain.onclick = function () {
+          memo.agenda = false; delete memo.talked; delete memo.talkedAt;
+          memo.text = m.querySelector('#m-text').value.trim() || memo.text;
+          Store.put(sp, 'memo', memo);
+          closeModal(); renderAll(); toast('ふつうのメモにしました');
         };
         m.querySelector('#m-task').onclick = function () {
           // 1行目をやることに、残りをタスクのメモに。★同じ入れ物（個人なら個人）の中だけで動かす
@@ -3092,6 +3187,28 @@
         }
       }
       if (b.dataset.act === 'edit') editTask(row.dataset.id);
+    });
+
+    /* 会議の議題 */
+    var agendaInput = document.getElementById('agendaInput');
+    document.getElementById('agendaForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (addAgenda(agendaInput.value)) { agendaInput.value = ''; agendaInput.focus(); }
+    });
+    document.getElementById('agendaList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act]');
+      if (!b) return;
+      if (b.dataset.act === 'showtalked') { showTalked = !showTalked; renderAgenda(); return; }
+      if (b.dataset.act === 'agclear') { clearTalked(); return; }
+      var row = b.closest('.trow');
+      if (!row) return;
+      if (b.dataset.act === 'agedit') { editMemo(row.dataset.id); return; }
+      if (b.dataset.act === 'agtoggle') {
+        var ck = row.querySelector('.ck'), cur = Store.get(AGSP, 'memo', row.dataset.id);
+        if (ck.classList.contains('pop')) return;
+        if (cur && !cur.talked) { ck.classList.add('pop'); setTimeout(function () { toggleAgenda(row.dataset.id); }, 380); }
+        else toggleAgenda(row.dataset.id);
+      }
     });
 
     var memoInput = document.getElementById('memoInput');
