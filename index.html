@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=5ba9c1bd">
+<link rel="stylesheet" href="css/style.css?v=ae1845f6">
 </head>
 <body data-space="personal">
 
@@ -116,6 +116,27 @@
       </div>
     </div>
     <div class="rule" id="taskRule"></div>
+    <!-- 並び替えと絞り込み（個人と会社で別々に覚える。探す言葉は覚えない） -->
+    <div class="tview" id="taskView">
+      <div class="tvbar">
+        <label class="tvsort"><span>並び</span><select id="tvSort" aria-label="並び">
+          <option value="auto">おすすめ</option><option value="due">期限の近い順</option><option value="doOn">やる日の近い順</option>
+          <option value="prio">重要度の高い順</option><option value="new">新しい順</option><option value="old">古い順</option><option value="name">名前順</option>
+        </select></label>
+        <button type="button" class="chip" id="tvFilterBtn" aria-expanded="false">絞り込み<b id="tvCount"></b></button>
+        <input type="search" id="tvQuery" placeholder="探す" enterkeyhint="search" autocomplete="off" aria-label="タスクを探す">
+      </div>
+      <div class="tvpanel" id="tvPanel" hidden>
+        <div class="tvrow"><span class="optlbl">重要度</span><div class="tvchips" data-group="prio">
+          <button type="button" class="chip" data-v="high">高</button><button type="button" class="chip" data-v="mid">中</button><button type="button" class="chip" data-v="low">低</button></div></div>
+        <div class="tvrow"><span class="optlbl">日付</span><div class="tvchips" data-group="when">
+          <button type="button" class="chip" data-v="today">今日やる</button><button type="button" class="chip" data-v="late">期限切れ</button>
+          <button type="button" class="chip" data-v="week">7日以内</button><button type="button" class="chip" data-v="nodate">日付なし</button></div></div>
+        <div class="tvrow"><span class="optlbl">そのほか</span><div class="tvchips" data-group="has">
+          <button type="button" class="chip" data-v="time">時刻あり</button><button type="button" class="chip" data-v="note">メモあり</button></div></div>
+        <button type="button" class="linkbtn" id="tvClear">絞り込みを全部外す</button>
+      </div>
+    </div>
     <div id="taskList"></div>
   </section>
 
@@ -221,11 +242,11 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=5ba9c1bd"></script>
-<script src="js/store.js?v=5ba9c1bd"></script>
-<script src="js/sync.js?v=5ba9c1bd"></script>
-<script src="js/lock.js?v=5ba9c1bd"></script>
-<script src="js/qr.js?v=5ba9c1bd"></script>
-<script src="js/app.js?v=5ba9c1bd"></script>
+<script src="js/config.js?v=ae1845f6"></script>
+<script src="js/store.js?v=ae1845f6"></script>
+<script src="js/sync.js?v=ae1845f6"></script>
+<script src="js/lock.js?v=ae1845f6"></script>
+<script src="js/qr.js?v=ae1845f6"></script>
+<script src="js/app.js?v=ae1845f6"></script>
 </body>
 </html>

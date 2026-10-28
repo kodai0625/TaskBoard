@@ -264,6 +264,7 @@
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', sp === 'work' ? '#4a3527' : '#2a2433');
     document.getElementById('tabApps').hidden = sp !== APPSP;     // 自作アプリは個人の側だけ
+    paintTaskView();                                              // 並びと絞り込みは、側ごとの覚え
     document.getElementById('tabBuy').hidden = sp !== BUYSP;      // 買い出しは会社の側だけ
     document.getElementById('taskInput').placeholder = label() + 'のタスクを足す';
     document.getElementById('memoInput').placeholder = label() + 'のメモを書く';
@@ -474,24 +475,108 @@
       + '<div class="facts">' + f.join('') + '</div>';
   }
 
+  /* ---------- 並び替えと絞り込み（2026-10-28 ko-dai さんの願い） ----------
+     タスクの一覧（済みでないもの・済み）を並び替えて、重要度・日付・時刻やメモの有る無し・言葉で絞る。
+       ・同じ組の中はどれか（重要度 高か中、など）。組どうしは全部（重要度 高 で、今日やる、など）
+       ・並びと絞り込みは、個人と会社で別々に、この端末の画面の覚えとして持つ（tb.ui の tv）。探す言葉は覚えない
+       ・習慣は、言葉と重要度と「時刻あり／メモあり」で絞る（日付が無いので、日付で絞っているときは出さない）
+       ・今日の帯と、タブの数は、絞り込みに関係なく全部の数のまま */
+  var TV_SORTS = { auto: 1, due: 1, doOn: 1, prio: 1, new: 1, old: 1, name: 1 };
+  var tvQuery = { personal: '', work: '' };
+  function tv() {
+    var u = Store.ui();
+    if (!u.tv || typeof u.tv !== 'object') u.tv = {};
+    var v = u.tv[space()] = u.tv[space()] || {};
+    if (!TV_SORTS[v.sort]) v.sort = 'auto';
+    ['prio', 'when', 'has'].forEach(function (k) { if (!Array.isArray(v[k])) v[k] = []; });
+    return v;
+  }
+  /** 探すときの文字のそろえ方：全角・半角、大文字・小文字、カタカナ・ひらがなの違いを見ない */
+  function tvNorm(s) {
+    return String(s || '').normalize('NFKC').toLowerCase()
+      .replace(/[\u30a1-\u30f6]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x60); });
+  }
+  function tvOn(v) { return v.prio.length + v.when.length + v.has.length + (tvQuery[space()].trim() ? 1 : 0); }
+  function tvMatch(t, v, habit) {
+    var words = tvNorm(tvQuery[space()]).split(/\s+/).filter(Boolean), text = tvNorm(t.title + ' ' + (t.note || ''));
+    if (words.some(function (w) { return text.indexOf(w) < 0; })) return false;
+    if (v.prio.length && v.prio.indexOf(prioOf(t)) < 0) return false;
+    if (v.has.length && !v.has.some(function (k) { return k === 'time' ? !!t.time : !!t.note; })) return false;
+    if (v.when.length) {
+      if (habit) return false;
+      var today = U.today(), week = U.addDays(7), nd = nearDay(t);
+      return v.when.some(function (k) {
+        if (k === 'today') return !!t.doOn && t.doOn <= today;
+        if (k === 'late') return !!t.due && t.due < today;
+        if (k === 'week') return !!nd && nd >= today && nd <= week;
+        if (k === 'nodate') return !t.doOn && !t.due;
+        return false;
+      });
+    }
+    return true;
+  }
+  /** 日付の近い順（日付の無いものは下）。同じ日は重要度の高い順 → 新しい順 */
+  function byDay(key) {
+    return function (a, b) {
+      var x = a[key] || '', y = b[key] || '';
+      if (x !== y) { if (!x) return 1; if (!y) return -1; return x < y ? -1 : 1; }
+      return PRIO[prioOf(a)].rank - PRIO[prioOf(b)].rank || (b.createdAt || 0) - (a.createdAt || 0);
+    };
+  }
+  function tvSorter(sort, done) {
+    if (sort === 'due' || sort === 'doOn') return byDay(sort);
+    if (sort === 'prio') return function (a, b) { return PRIO[prioOf(a)].rank - PRIO[prioOf(b)].rank || sortOpen(a, b); };
+    if (sort === 'new') return function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); };
+    if (sort === 'old') return function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); };
+    if (sort === 'name') return function (a, b) { return String(a.title || '').localeCompare(String(b.title || ''), 'ja'); };
+    return done ? function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); } : sortOpen;   // おすすめ：今までの並び
+  }
+  /** 並びと絞り込みの欄を、いまの側の覚えに合わせる（探す欄は、打っている途中なら触らない） */
+  function paintTaskView() {
+    var v = tv(), n = v.prio.length + v.when.length + v.has.length;
+    document.getElementById('tvSort').value = v.sort;
+    document.getElementById('tvCount').textContent = n ? ' ' + n : '';
+    document.getElementById('tvFilterBtn').classList.toggle('on', n > 0);
+    document.querySelectorAll('#tvPanel [data-group]').forEach(function (g) {
+      g.querySelectorAll('[data-v]').forEach(function (b) { b.classList.toggle('on', v[g.dataset.group].indexOf(b.dataset.v) >= 0); });
+    });
+    var q = document.getElementById('tvQuery');
+    if (document.activeElement !== q) q.value = tvQuery[space()];
+  }
+  function tvClear() {
+    var v = tv();
+    v.prio = []; v.when = []; v.has = [];
+    tvQuery[space()] = '';
+    document.getElementById('tvQuery').value = '';
+    Store.saveUi(); paintTaskView(); renderTasks();
+  }
+
   function renderTasks() {
     var all = Store.list(space(), 'task');
     var dev = space() === 'work' ? all.filter(isDev) : [];
     all = all.filter(function (t) { return !isDev(t); });
     var habits = all.filter(isHabit);
     all = all.filter(function (t) { return !isHabit(t); });
-    var open = all.filter(function (t) { return !t.done; }).sort(sortOpen);
-    var done = all.filter(function (t) { return t.done; })
-      .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
+    var v = tv(), filtering = tvOn(v) > 0;
+    var openAll = all.filter(function (t) { return !t.done; }), doneAll = all.filter(function (t) { return t.done; });
+    var open = openAll.filter(function (t) { return tvMatch(t, v); }).sort(tvSorter(v.sort, false));
+    var done = doneAll.filter(function (t) { return tvMatch(t, v); }).sort(tvSorter(v.sort, true));
+    var habitsShown = habits.filter(function (x) { return tvMatch(x, v, true); });
 
-    renderToday(open, dev, habits);
-    var h = renderHabits(habits, U.today());
-    if (habits.length) h += '<div class="habithead">タスク<span>' + open.length + '件</span></div>';
+    renderToday(openAll.sort(sortOpen), dev, habits);   // 今日の帯は、絞り込みに関係なく全部の数
+    var h = filtering
+      ? '<div class="tvnote">絞り込み中：' + open.length + '件を出しています（全' + openAll.length + '件）'
+        + ' <button type="button" class="linkbtn" data-act="tvclear">外す</button></div>'
+      : '';
+    h += renderHabits(habitsShown, U.today());
+    if (habitsShown.length) h += '<div class="habithead">タスク<span>' + open.length + '件</span></div>';
     if (open.length) {
       h += '<div class="card list">' + open.map(taskRow).join('') + '</div>';
+    } else if (filtering) {
+      h += '<div class="empty">当てはまるタスクはありません</div>';
     } else {
       h += '<div class="empty art">' + STAR
-        + (done.length ? '<b>全部済みました</b>おつかれさまでした' : '<b>まだ何もありません</b>上に書いて足してください') + '</div>';
+        + (doneAll.length ? '<b>全部済みました</b>おつかれさまでした' : '<b>まだ何もありません</b>上に書いて足してください') + '</div>';
     }
     h += renderDev(dev);
     if (done.length) {
@@ -2952,6 +3037,23 @@
     // 予定を開いている間は、いまの時刻の線を1分ごとに動かす
     setInterval(function () { if (view === 'plan' && modalWrap.hidden) renderPlan(); }, 60000);
     paintAddOpts();
+    /* 並び替えと絞り込み */
+    document.getElementById('tvSort').addEventListener('change', function (e) { tv().sort = e.target.value; Store.saveUi(); renderTasks(); });
+    document.getElementById('tvFilterBtn').onclick = function () {
+      var p = document.getElementById('tvPanel');
+      p.hidden = !p.hidden;
+      this.setAttribute('aria-expanded', p.hidden ? 'false' : 'true');
+    };
+    document.getElementById('tvPanel').addEventListener('click', function (e) {
+      if (e.target.closest('#tvClear')) { tvClear(); return; }
+      var b = e.target.closest('[data-v]');
+      if (!b) return;
+      var v = tv(), g = b.closest('[data-group]').dataset.group, i = v[g].indexOf(b.dataset.v);
+      if (i >= 0) v[g].splice(i, 1); else v[g].push(b.dataset.v);
+      Store.saveUi(); paintTaskView(); renderTasks();
+    });
+    document.getElementById('tvQuery').addEventListener('input', function (e) { tvQuery[space()] = e.target.value; renderTasks(); });
+
     var taskInput = document.getElementById('taskInput');
     document.getElementById('taskForm').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -2961,6 +3063,7 @@
       var b = e.target.closest('[data-act]');
       if (!b) return;
       if (b.dataset.act === 'showdone') { showDone = !showDone; renderTasks(); return; }
+      if (b.dataset.act === 'tvclear') { tvClear(); return; }
       if (b.dataset.act === 'showdev') { showDev = !showDev; renderTasks(); return; }
       if (b.dataset.act === 'showrest') { showRest = !showRest; renderTasks(); return; }
       var row = b.closest('.trow');
