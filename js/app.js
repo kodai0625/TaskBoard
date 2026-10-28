@@ -1773,16 +1773,43 @@
     });
   }
 
+  /* メモの中の URL を押せるようにする（2026-10-28 ko-dai さん）。
+     ★全角のかっこ・句読点で URL を切る（「（説明）https://…」のように、日本語と続けて書くため） */
+  var URL_IN_TEXT = /https?:\/\/[^\s<>"'`（）「」『』【】、。，．]+/g;
+  function linkText(s) {
+    s = String(s || '');
+    var out = '', last = 0, m;
+    URL_IN_TEXT.lastIndex = 0;
+    while ((m = URL_IN_TEXT.exec(s))) {
+      var u = m[0].replace(/[.,;:!?)\]]+$/, '');   // 文の終わりの記号は URL に入れない
+      out += U.esc(s.slice(last, m.index));
+      out += okUrl(u)
+        ? '<a class="mlink" href="' + U.esc(u) + '" target="_blank" rel="noopener noreferrer">' + U.esc(u) + '</a>'
+        : U.esc(u);
+      last = m.index + u.length;
+    }
+    return out + U.esc(s.slice(last));
+  }
+
+  /* ★iPhone のホーム画面のアプリでふつうのリンクを押すと、アプリの中の Safari で開いてしまう。
+     iPhone では Chrome のアドレス（googlechromes://）にして Chrome で開く。Mac などはふつうのリンクのまま */
+  var IOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);   // iPad は Mac のふりをする
+  function chromeUrl(u) {
+    return u.replace(/^https:\/\//i, 'googlechromes://').replace(/^http:\/\//i, 'googlechrome://');
+  }
+
   function renderMemos() {
     renderAgenda();
     var list = Store.list(space(), 'memo').filter(function (m) { return !isAgenda(m); })
       .sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+    // ★押せるリンクを入れるので、カードは button ではなく div（button の中のリンクは押せない端末がある）
     var h = list.length
       ? list.map(function (m) {
-          return '<button type="button" class="card memo" data-id="' + U.esc(m.id) + '">'
-            + '<span class="mtext">' + U.esc(m.text) + '</span>'
+          return '<div class="card memo" role="button" tabindex="0" data-id="' + U.esc(m.id) + '">'
+            + '<span class="mtext">' + linkText(m.text) + '</span>'
             + '<span class="mtime">' + U.esc(U.stamp(m.updatedAt)) + '</span>'
-            + '</button>';
+            + '</div>';
         }).join('')
       : '<div class="empty">まだメモはありません</div>';
     document.getElementById('memoList').innerHTML = h;
@@ -3223,9 +3250,20 @@
         if (addMemo(memoInput.value)) { memoInput.value = ''; grow(memoInput); }
       }
     });
-    document.getElementById('memoList').addEventListener('click', function (e) {
+    var memoList = document.getElementById('memoList');
+    memoList.addEventListener('click', function (e) {
+      var a = e.target.closest('a.mlink');
+      if (a) {                                  // リンクを押したときは、直す画面を開かない
+        if (IOS) { e.preventDefault(); global.location.href = chromeUrl(a.getAttribute('href')); }
+        return;
+      }
       var c = e.target.closest('.memo');
       if (c) editMemo(c.dataset.id);
+    });
+    memoList.addEventListener('keydown', function (e) {
+      if (e.target.closest('a.mlink')) return;
+      var c = e.target.closest('.memo');
+      if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); editMemo(c.dataset.id); }
     });
 
     /* 買い出し */

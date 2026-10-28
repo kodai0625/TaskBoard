@@ -191,7 +191,9 @@ main{max-width:640px; margin:0 auto}
 .empty{color:var(--dim); font-size:13px; text-align:center; padding:22px 8px}
 
 /* メモ */
-.memo{display:block; width:100%; text-align:left; color:var(--ink)}
+.memo{display:block; width:100%; text-align:left; color:var(--ink); cursor:pointer}
+/* メモの中の URL（押すと開く。2026-10-28） */
+.mlink{color:var(--accent); text-decoration:underline; text-underline-offset:2px; word-break:break-all}
 /* 長いメモも、途中で切らずに全部出す（2026-10-13 ko-dai さん。前は6行で切っていた） */
 .mtext{display:block; white-space:pre-wrap; word-break:break-word; font-size:14.5px; line-height:1.6}
 .mtime{display:block; font-size:11px; color:var(--dim); margin-top:6px; text-align:right}
