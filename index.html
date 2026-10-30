@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/task-icon-premium-focus.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=c60fe928">
+<link rel="stylesheet" href="css/style.css?v=972a4ca9">
 </head>
 <body data-space="personal">
 
@@ -42,7 +42,7 @@
     <button type="button" class="tab" data-view="memo">メモ <span class="cnt" id="cntMemo"></span></button>
     <!-- 会社の側にだけ出る -->
     <button type="button" class="tab" data-view="buy" id="tabBuy" hidden>買い出し <span class="cnt" id="cntBuy"></span></button>
-    <!-- 個人の側にだけ出る。中身はパスワードで暗号にして、この端末の中だけに持つ（js/lock.js） -->
+    <!-- 個人の側にだけ出る。中身はパスワードで暗号にして、暗号のままパソコンとスマホでそろえる（js/lock.js。2026-10-30 から） -->
     <button type="button" class="tab" data-view="apps" id="tabApps"><svg class="lk" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="M17 9V7A5 5 0 0 0 7 7v2H5v12h14V9h-2Zm-8 0V7a3 3 0 0 1 6 0v2H9Z"/></svg>自作アプリ</button>
   </nav>
 </header>
@@ -190,7 +190,8 @@
       <button type="submit" class="mini go">決める</button>
       <div class="lockmsg" id="setMsg"></div>
       <ul class="locknote">
-        <li>一覧は、この端末の中だけに残します。どこにも送りません（ほかの端末には出ないので、端末ごとに入れます）</li>
+        <li>一覧は、暗号にしたまま受け口（Google のシート）へ送り、パソコンとスマホでそろえます。パスワードも両方で同じです</li>
+        <li>もう一方の端末で決めてあれば、ここで決めずに少し待つと、開ける画面に変わります</li>
         <li>★忘れると、中身は取り出せません（決め直すと一覧は消えます）</li>
         <li>英字と数字を混ぜた長めのものが安全です。誕生日は避けてください</li>
       </ul>
@@ -229,7 +230,7 @@
         <button type="button" class="mini" id="appsPass">パスワードを変える</button>
         <button type="button" class="mini" id="appsBio" hidden>生体認証を使う</button>
       </div>
-      <div class="note appsnote">この一覧は、この端末の中だけにあります（どこにも送りません・控えもありません）。<br>ほかのタブに移る・アプリを1分より長く閉じる・5分さわらない、のどれかでロックします。</div>
+      <div class="note appsnote">この一覧は、暗号のままパソコンとスマホでそろえます（読めるのはパスワードを知っている人だけ。控えと Obsidian には入れません）。<br>ほかのタブに移る・アプリを1分より長く閉じる・5分さわらない、のどれかでロックします。</div>
     </div>
 
     <div class="empty" id="apps-no" hidden>この開き方では暗号が使えないので、自作アプリの一覧は使えません。<br>公開しているページ（https://…）から開いてください。</div>
@@ -251,11 +252,11 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=c60fe928"></script>
-<script src="js/store.js?v=c60fe928"></script>
-<script src="js/sync.js?v=c60fe928"></script>
-<script src="js/lock.js?v=c60fe928"></script>
-<script src="js/qr.js?v=c60fe928"></script>
-<script src="js/app.js?v=c60fe928"></script>
+<script src="js/config.js?v=972a4ca9"></script>
+<script src="js/store.js?v=972a4ca9"></script>
+<script src="js/sync.js?v=972a4ca9"></script>
+<script src="js/lock.js?v=972a4ca9"></script>
+<script src="js/qr.js?v=972a4ca9"></script>
+<script src="js/app.js?v=972a4ca9"></script>
 </body>
 </html>

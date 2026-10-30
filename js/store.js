@@ -10,10 +10,11 @@
    ・同期の目印は側ごとに別のキーです（受け口の中でも側ごとに別のタブに入ります）
        tb.personal.meta／tb.work.meta … { since, lastSyncAt }
    ・送信箱（outbox）に積んだものを、js/sync.js が「その側」の印を付けて送ります
-   ・★自作アプリの一覧（個人の側だけ・ロックつき）は、別の入れ物です（2026-10-11 ko-dai さん「どこにも記録を残さない」）
-       tb.apps … この端末の中だけ。★送信箱に積まない・受け口から受け取らない・控えにも入れない
-     中身は暗号（js/lock.js）なので、ここでは読めません。
-     同じ日の最初の版だけ、memo の入れ物に入れて受け口へ送っていました（印は src:'app' と、app- で始まる id）。
+   ・★自作アプリの一覧（個人の側だけ・ロックつき）。中身は暗号（js/lock.js）なので、ここでは読めません
+       2026-10-30 から … パソコンとスマホでそろえる（ko-dai さん）。'vlt' の種類として memo の入れ物に同居し、
+                         暗号のまま受け口へ送る。★控え（持ち出しの1枚）と Obsidian には入れない
+       tb.apps … この端末の中だけ。いまは生体認証の箱（app-bio）と、前の版の一覧（同期のあとに 'vlt' へ移す。js/app.js）
+     2026-10-11 の最初の版だけ、memo の入れ物に入れて受け口へ送っていました（印は src:'app' と、app- で始まる id）。
      その印の付いたものは、いまも「メモではない」として、一覧・受け取り・控えから外します
    ・★買い出しリスト（2026-10-13）は、memo の入れ物に同居しています。受け口の GAS が task と memo しか
      受けないためです（貼り直しを増やさない）。印は src:'buy' と、buy- で始まる id。
@@ -28,8 +29,10 @@
   /* memo の入れ物に同居する種類と、その id の頭（受け口の GAS が task と memo しか受けないため）。
        buy … 買い出し（2026-10-13）
        day … その日の仕事の時間（予定のページの「自動で組む」の材料。2026-10-23）
+       vlt … 自作アプリの一覧（暗号のまま。2026-10-30 からパソコンとスマホで同期する。それまでは端末だけの tb.apps）
+       ui  … 画面の決まり（並び替え・絞り込み、自動で組む決まり。2026-10-30 から同期する）
      どれも印は src と id の頭。メモの一覧（list(…,'memo')）には出さない */
-  var SUB_PREFIX = { buy: 'buy-', day: 'day-' };
+  var SUB_PREFIX = { buy: 'buy-', day: 'day-', vlt: 'vlt-', ui: 'ui-' };
   var KEY_UI = 'tb.ui';
 
   var bags = {};      // { personal: {task:{}, memo:{}, outbox:[]}, work: {...} }
@@ -87,7 +90,7 @@
     if (['task', 'plan', 'memo', 'buy'].indexOf(ui.view) < 0) ui.view = 'task';
   }
 
-  function save(space) { write(key(space), bags[space]); }
+  function save(space) { return write(key(space), bags[space]); }
 
   function newId() {
     return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -141,10 +144,10 @@
     ob.push({ kind: kind, id: id });
   }
 
-  /** 控えに入れるメモ（自作アプリの印の付いたものを除く） */
+  /** 控えに入れるメモ（自作アプリの一覧を除く。前の版の印の付いたものも、同期している暗号の一覧も） */
   function plainMemos(m) {
     var out = {};
-    Object.keys(m).forEach(function (id) { if (!isApp(m[id])) out[id] = m[id]; });
+    Object.keys(m).forEach(function (id) { if (!isApp(m[id]) && subKind(m[id]) !== 'vlt') out[id] = m[id]; });
     return out;
   }
 
@@ -203,6 +206,28 @@
       }
     },
 
+    /** 何件かを、まとめて足す・直す・消す（端末に書くのは1回。自作アプリの一覧を包み直すときなど）。
+        deleted の付いたものは消した印にする（自作アプリの一覧は、中身を残さず印だけ）。書けたら true */
+    putMany: function (space, kind, recs) {
+      check(space);
+      var now = Date.now(), b = bags[space][bagOf(kind)];
+      recs.forEach(function (rec) {
+        if (rec.deleted) {
+          var cur = b[rec.id];
+          if (!cur || cur.deleted) return;
+          rec = kind === 'vlt' ? { id: rec.id, createdAt: cur.createdAt, deleted: true } : Object.assign(cur, { deleted: true });
+        }
+        if (SUB_PREFIX.hasOwnProperty(kind)) rec.src = kind;
+        if (!rec.id) { rec.id = (SUB_PREFIX[kind] || '') + newId(); rec.createdAt = now; }
+        rec.updatedAt = now;
+        b[rec.id] = rec;
+        queue(space, bagOf(kind), rec.id);
+      });
+      var ok = save(space);
+      Store.onWrite && Store.onWrite(space);
+      return ok;
+    },
+
     /** 消す（記録は残して deleted の印を付ける。受け口に「消した」を伝えるため） */
     remove: function (space, kind, id) {
       check(space);
@@ -214,6 +239,8 @@
       }
       var rec = bags[space][bagOf(kind)][id];
       if (!rec) return;
+      // 自作アプリの一覧は、消した印だけを残す（暗号の中身も、受け口に残さない）
+      if (kind === 'vlt') rec = bags[space].memo[id] = { id: id, src: 'vlt', createdAt: rec.createdAt };
       rec.deleted = true;
       rec.updatedAt = Date.now();
       queue(space, bagOf(kind), id);
@@ -329,7 +356,7 @@
     },
 
     /** この端末の中身だけ消す。つなぎ先と合言葉は残し、次の同期で受け口から全部取り直す。
-        ★自作アプリの一覧（tb.apps）は消さない。受け口に無いので、消すと取り直せないため */
+        ★tb.apps（生体認証の箱・前の版の一覧）は消さない。受け口に無いので、消すと取り直せないため */
     wipe: function (space) {
       check(space);
       bags[space] = empty();

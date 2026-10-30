@@ -478,18 +478,27 @@
   /* ---------- 並び替えと絞り込み（2026-10-28 ko-dai さんの願い） ----------
      タスクの一覧（済みでないもの・済み）を並び替えて、重要度・日付・時刻やメモの有る無し・言葉で絞る。
        ・同じ組の中はどれか（重要度 高か中、など）。組どうしは全部（重要度 高 で、今日やる、など）
-       ・並びと絞り込みは、個人と会社で別々に、この端末の画面の覚えとして持つ（tb.ui の tv）。探す言葉は覚えない
+       ・並びと絞り込みは、個人と会社で別々に持ち、パソコンとスマホでそろえる（'ui' の種類の ui-tv。2026-10-30）。
+         前の版は端末の画面の覚え（tb.ui の tv）だった。同期が1回すんだら移す（movePrefs）。探す言葉は覚えない・送らない
        ・習慣は、言葉と重要度と「時刻あり／メモあり」で絞る（日付が無いので、日付で絞っているときは出さない）
        ・今日の帯と、タブの数は、絞り込みに関係なく全部の数のまま */
   var TV_SORTS = { auto: 1, due: 1, doOn: 1, prio: 1, new: 1, old: 1, name: 1 };
   var tvQuery = { personal: '', work: '' };
-  function tv() {
-    var u = Store.ui();
-    if (!u.tv || typeof u.tv !== 'object') u.tv = {};
-    var v = u.tv[space()] = u.tv[space()] || {};
-    if (!TV_SORTS[v.sort]) v.sort = 'auto';
-    ['prio', 'when', 'has'].forEach(function (k) { if (!Array.isArray(v[k])) v[k] = []; });
-    return v;
+  var TV_ID = 'ui-tv';
+  function tvClean(v) {
+    v = v && typeof v === 'object' ? v : {};
+    function arr(x) { return Array.isArray(x) ? x.filter(function (s) { return typeof s === 'string'; }) : []; }
+    return { sort: TV_SORTS[v.sort] ? v.sort : 'auto', prio: arr(v.prio), when: arr(v.when), has: arr(v.has) };
+  }
+  /** いまの側の並びと絞り込み（写しを返す。変えたら tvSave） */
+  function tv(sp) {
+    sp = sp || space();
+    var r = Store.get(sp, 'ui', TV_ID), u = Store.ui();
+    return tvClean(r ? r.v : u.tv && u.tv[sp]);
+  }
+  function tvSave(v) {
+    var cur = Store.get(space(), 'ui', TV_ID);
+    Store.put(space(), 'ui', { id: TV_ID, createdAt: (cur && cur.createdAt) || Date.now(), v: tvClean(v) });
   }
   /** 探すときの文字のそろえ方：全角・半角、大文字・小文字、カタカナ・ひらがなの違いを見ない */
   function tvNorm(s) {
@@ -548,10 +557,11 @@
     v.prio = []; v.when = []; v.has = [];
     tvQuery[space()] = '';
     document.getElementById('tvQuery').value = '';
-    Store.saveUi(); paintTaskView(); renderTasks();
+    tvSave(v); renderTasks();
   }
 
   function renderTasks() {
+    paintTaskView();                     // もう一方の端末で変えた並びも、欄に出す
     var all = Store.list(space(), 'task');
     var dev = space() === 'work' ? all.filter(isDev) : [];
     all = all.filter(function (t) { return !isDev(t); });
@@ -924,12 +934,14 @@
        ★期限もやる日も無いタスクは入れない（2026-10-23 ko-dai さん。前は重要度 高のものを空きに入れていた）
        （先の日を組むときに、ほかの日のものを連れてこないため）。やる日が先の日に決まっているものは前倒ししない
      ・夜中の0時を越える時刻には入れない（時刻はその日の中だけで持つため）
-     ・組み方の数（睡眠7時間など）は、この端末の画面の覚え（tb.ui の planConf） */
+     ・組み方の数（睡眠7時間など）は、パソコンとスマホでそろえる（個人の側の 'ui' の種類の ui-plan。2026-10-30）。
+       前の版は端末の画面の覚え（tb.ui の planConf）だった。同期が1回すんだら移す（movePrefs） */
   var PLAN_DEF = { sleepH: 7, prepMin: 60, windMin: 30, gapMin: 10, wake: '07:00' };
   var planRuns = {};                 // { 日付: { at, placed, left } } 最後に組んだ結果（この画面を開いている間だけ）
 
+  var PLAN_ID = 'ui-plan';
   function planConf() {
-    var u = Store.ui(), c = u.planConf || {};
+    var r = Store.get('personal', 'ui', PLAN_ID), c = (r ? (!r.deleted && r.v) : Store.ui().planConf) || {};
     var out = {};
     Object.keys(PLAN_DEF).forEach(function (k) { out[k] = c[k] != null && c[k] !== '' ? c[k] : PLAN_DEF[k]; });
     out.sleepH = Math.max(3, Math.min(12, Number(out.sleepH) || 7));
@@ -1356,7 +1368,26 @@
       });
   }
 
-  /** 組み方の数（この端末だけ） */
+  /** 前の版の画面の覚え（並び・組む決まり）を、同期する記録へ移す。
+      その側の同期がこの画面で1回すんでから（もう一方の端末が先に移していれば、そちらを使う）。同期していなければ、すぐ */
+  function movePrefs(sp) {
+    var u = Store.ui(), dirty = false;
+    if (Sync.enabled() && Store.meta(sp).lastSyncAt < bootAt) return;
+    if (u.tv && u.tv[sp]) {
+      var v = tvClean(u.tv[sp]);
+      if (!Store.get(sp, 'ui', TV_ID) && (v.sort !== 'auto' || v.prio.length || v.when.length || v.has.length)) {
+        Store.put(sp, 'ui', { id: TV_ID, createdAt: Date.now(), v: v });
+      }
+      delete u.tv[sp]; dirty = true;
+    }
+    if (sp === 'personal' && u.planConf) {
+      if (!Store.get(sp, 'ui', PLAN_ID)) Store.put(sp, 'ui', { id: PLAN_ID, createdAt: Date.now(), v: u.planConf });
+      delete u.planConf; dirty = true;
+    }
+    if (dirty) Store.saveUi();
+  }
+
+  /** 組み方の数（パソコンとスマホでそろえる） */
   function editPlanConf() {
     var c = planConf();
     modal('<h2>自動で組むときの決まり</h2>'
@@ -1365,15 +1396,21 @@
       + '<div class="f"><label for="pc-prep">起きてから動き出すまで（分）</label><input type="text" inputmode="numeric" id="pc-prep" value="' + c.prepMin + '"></div>'
       + '<div class="f"><label for="pc-wind">寝る前のゆとり（分）</label><input type="text" inputmode="numeric" id="pc-wind" value="' + c.windMin + '"></div>'
       + '<div class="f"><label for="pc-gap">予定と予定のあいだ（分）</label><input type="text" inputmode="numeric" id="pc-gap" value="' + c.gapMin + '"></div>'
-      + '<div class="hint">この端末だけの決まりです。通勤の時間は職場ごとに決まっています。タスクの長さは、タスクの「時刻と長さ」（無ければ30分）を使います。</div>'
+      + '<div class="hint">パソコンとスマホで同じ決まりを使います。通勤の時間は職場ごとに決まっています。タスクの長さは、タスクの「時刻と長さ」（無ければ30分）を使います。</div>'
       + '<div class="acts"><button type="button" id="pc-reset">はじめの値</button><button type="button" id="pc-cancel">やめる</button><button type="button" class="go" id="pc-ok">決める</button></div>',
       function (m) {
         m.querySelector('#pc-cancel').onclick = closeModal;
-        m.querySelector('#pc-reset').onclick = function () { delete Store.ui().planConf; Store.saveUi(); closeModal(); renderAll(); };
+        m.querySelector('#pc-reset').onclick = function () {
+          Store.remove('personal', 'ui', PLAN_ID);
+          delete Store.ui().planConf; Store.saveUi();
+          closeModal(); renderAll();
+        };
         m.querySelector('#pc-ok').onclick = function () {
           var num = function (id) { return Number(String(m.querySelector(id).value).normalize('NFKC')); };
-          Store.ui().planConf = { sleepH: num('#pc-sleep'), wake: m.querySelector('#pc-wake').value, prepMin: num('#pc-prep'), windMin: num('#pc-wind'), gapMin: num('#pc-gap') };
-          Store.saveUi();
+          var cur = Store.get('personal', 'ui', PLAN_ID);
+          Store.put('personal', 'ui', { id: PLAN_ID, createdAt: (cur && cur.createdAt) || Date.now(),
+            v: { sleepH: num('#pc-sleep'), wake: m.querySelector('#pc-wake').value, prepMin: num('#pc-prep'), windMin: num('#pc-wind'), gapMin: num('#pc-gap') } });
+          delete Store.ui().planConf; Store.saveUi();
           closeModal(); renderAll();
         };
       });
@@ -2194,26 +2231,72 @@
 
   /* ================= 自作アプリ（個人の側だけ・ロックつき。2026-10-11 ko-dai さんの願い） =================
      自分で作ったアプリの名称とURLの一覧。★中身は、決めたパスワードで暗号にして持つ（js/lock.js）
-       ・★どこにも記録を残さない（2026-10-11 ko-dai さん）。この端末の中（tb.apps）にだけ置く。
-         受け口へ送らない・受け口から受け取らない・控えに入れない・Obsidian に書き出さない（js/store.js）
-         → 端末ごとに別々の一覧になる。パスワードも端末ごと
-       ・app-lock … 鍵のもと（salt・回数）と、パスワードが合っているかを確かめる箱。1つだけ
-       ・app-bio … 生体認証で開けるための箱（使うと決めた端末にだけある。下の「生体認証で開ける」）
-       ・app-xxxx … アプリ1つ。box に {name, url, group, order, qr} を暗号にして入れる。★暗号でない名称やURLは、端末にも持たない
+       ・2026-10-30 から、パソコンとスマホでそろえる（ko-dai さん）。暗号のまま受け口へ送る（'vlt' の種類。js/store.js）。
+         パスワードも1つ（どちらの端末でも同じ）。★暗号でない名称やURLは、端末にも受け口にも持たない。
+         控え（持ち出しの1枚）と Obsidian には入れない（js/store.js・書き出す.py）
+         （10-11〜10-30 は「どこにも記録を残さない」で、端末ごとに tb.apps に置いていた。下の「前の版から移す」）
+       ・vlt-lock … 鍵のもと（salt・回数）と、パスワードが合っているかを確かめる箱。1つだけ
+       ・vlt-xxxx … アプリ1つ。box に {name, url, group, order, qr} を暗号にして入れる
+           ks・ki … 包んだ鍵のもと（salt・回数）。前の版から移したものは、その端末の鍵のままなので、開けたときに包み直す
+           parts・pv … 箱が長いとき（QRの画像を入れたとき）は、受け口の1マスに入るように分ける（続きは vlt-xxxx~1 …。pv は組の印）
            group … まとめる見出し（空でもよい）／order … 並び（足した順）
            qr … 自分で入れた QRコードの画像（無ければ、URL からその場で作る。js/qr.js。作った絵は残さない）
+       ・app-bio … 生体認証で開けるための箱。★これだけは端末ごと（tb.apps）。下の「生体認証で開ける」
        ・★パスワードと鍵は、残さない・送らない。開いている間だけ、下の vault の中にある
        ・ほかのタブに移る／1分より長く裏に回る／5分さわらない → ロックする（開いた中身も画面から消す） */
-  var APPSP = 'personal', LOCK_ID = 'app-lock', KEY_FAIL = 'tb.applock.fail';
+  var APPSP = 'personal', LOCK_ID = 'vlt-lock', KEY_FAIL = 'tb.applock.fail';
+  var CHUNK = 40000;         // 受け口の1マスは5万字まで（gas/コード.gs の MAX_JSON）。長い箱は、この長さで分ける
   var Lock = TB.Lock;
-  var vault = null;          // 開いている間だけ { key, salt, items:[{id,name,url,group,order,qr}], bad:[id], touched }
+  // 開いている間だけ { key, salt, iter, keys:{鍵のもと:鍵}, items:[{id,name,url,group,order,qr,ks}], bad:[記録], wait, touched }
+  var vault = null;
   var appsBusy = false, appsModal = false, appsSeq = 0;
+  var bootAt = Date.now();   // この画面を開いた時刻（前の版から移すのは、このあと同期が1回すんでから）
 
   function lockHead() {
-    var h = Store.get(APPSP, 'app', LOCK_ID);
-    return h && h.salt && h.box ? h : null;
+    var h = Store.get(APPSP, 'vlt', LOCK_ID);
+    return h && !h.deleted && h.salt && h.box ? h : null;
   }
-  function appRecs() { return Store.list(APPSP, 'app').filter(function (r) { return r.id !== LOCK_ID && r.id !== BIO_ID; }); }
+  /** アプリの記録（分けた箱の続きは除く） */
+  function appRecs() { return Store.list(APPSP, 'vlt').filter(function (r) { return r.id !== LOCK_ID && !r.of; }); }
+  /** 分けた箱をつなぐ。続きがまだ届いていなければ null */
+  function fullBox(r) {
+    var s = String(r.box || '');
+    for (var i = 1; i <= (Number(r.parts) || 0); i++) {
+      var p = Store.get(APPSP, 'vlt', r.id + '~' + i);
+      if (!p || p.deleted || p.pv !== r.pv) return null;
+      s += String(p.part || '');
+    }
+    return s;
+  }
+  function newVid() { return 'vlt-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+  /** 包んだ箱を、残す形（分けた続きつき）にする。old は直す前の記録（続きが減ったら、余りを消す） */
+  function packApp(id, createdAt, box, salt, iter, old) {
+    var parts = [], i;
+    for (i = CHUNK; i < box.length; i += CHUNK) parts.push(box.slice(i, i + CHUNK));
+    var main = { id: id, createdAt: createdAt, box: box.slice(0, CHUNK), ks: salt, ki: iter }, out = [main];
+    if (parts.length) {
+      main.parts = parts.length;
+      main.pv = Lock.b64(Lock.random(6));
+      parts.forEach(function (p, j) { out.push({ id: id + '~' + (j + 1), createdAt: createdAt, of: id, part: p, pv: main.pv }); });
+    }
+    for (i = parts.length + 1; old && i <= (Number(old.parts) || 0); i++) out.push({ id: id + '~' + i, deleted: true });
+    return out;
+  }
+  /** 1件を消す形（分けた続きも） */
+  function dropApp(r) {
+    var out = [{ id: r.id, deleted: true }];
+    for (var i = 1; i <= (Number(r.parts) || 0); i++) out.push({ id: r.id + '~' + i, deleted: true });
+    return out;
+  }
+  /** まとめて1回で書く（途中で止まって、鍵のもとと中身の組が合わなくなることがないように） */
+  function saveVlt(recs) {
+    if (recs.length && !Store.putMany(APPSP, 'vlt', recs)) throw new Error('端末の空きがなくて残せませんでした');
+  }
+  function openVault(key, h) {
+    var keys = {};
+    keys[h.salt] = key;
+    return { key: key, salt: h.salt, iter: h.iter || Lock.ITER, keys: keys, items: [], bad: [], wait: 0, touched: Date.now() };
+  }
   function say(id, text, bad) {
     var el = document.getElementById(id);
     el.textContent = text || '';
@@ -2234,6 +2317,7 @@
 
   function appsMode() {
     if (!Lock.ok()) return 'no';
+    if (!moveOldVault()) return 'wait';
     var h = lockHead();
     // 鍵のもとが替わっていたら（別の窓で変えた・決め直した）、いまの鍵では開かないのでロックに戻す
     if (vault && (!h || h.salt !== vault.salt)) lockApps();
@@ -2243,27 +2327,89 @@
   /* 形（決める／ロック中／開いている）を入れ替えるだけ。欄は index.html に置いてあるので、
      同期で描き直しても、打ちかけのパスワードや名称は消えない */
   function renderApps() {
-    var mode = appsMode();
-    ['setup', 'locked', 'open', 'no'].forEach(function (m) { document.getElementById('apps-' + m).hidden = m !== mode; });
+    var mode = appsMode(), shown = mode === 'wait' ? 'locked' : mode;
+    ['setup', 'locked', 'open', 'no'].forEach(function (m) { document.getElementById('apps-' + m).hidden = m !== shown; });
+    if (mode === 'wait') {
+      say('lockMsg', Sync.of[APPSP].state().kind === 'error'
+        ? '同期がうまくいっていません。つながると、前の一覧をパソコンとスマホで使える形に移して、開けられるようになります'
+        : '同期を待っています…', Sync.of[APPSP].state().kind === 'error');
+    }
     bioCheck(); paintBio();
     if (mode === 'open') refreshApps();
   }
 
   /** 記録を全部開けて、一覧を描き直す。開かないもの（ほかのパスワードで入れたもの）は数だけ出す */
   function refreshApps() {
-    var v = vault, seq = ++appsSeq;
+    var v = vault, seq = ++appsSeq, wait = 0;
     return Promise.all(appRecs().map(function (r) {
-      return Lock.open(v.key, r.box).then(function (o) {
+      var box = fullBox(r), ks = r.ks || v.salt, k = v.keys[ks];
+      if (box === null) { wait++; return null; }
+      if (!k) return { rec: r, bad: true };
+      return Lock.open(k, box).then(function (o) {
         return {
           id: r.id, name: String(o.name || ''), url: String(o.url || ''), group: String(o.group || ''),
-          order: Number(o.order) || r.createdAt || 0, qr: okQr(o.qr) ? o.qr : ''
+          order: Number(o.order) || r.createdAt || 0, qr: okQr(o.qr) ? o.qr : '', ks: ks
         };
-      }, function () { return { id: r.id, bad: true }; });
+      }, function () { return { rec: r, bad: true }; });
     })).then(function (all) {
       if (vault !== v || seq !== appsSeq) return;
+      all = all.filter(Boolean);
       v.items = all.filter(function (a) { return !a.bad; }).sort(function (a, b) { return a.order - b.order; });
-      v.bad = all.filter(function (a) { return a.bad; }).map(function (a) { return a.id; });
+      v.bad = all.filter(function (a) { return a.bad; }).map(function (a) { return a.rec; });
+      v.wait = wait;
       paintApps();
+      tidyApps(v);
+    });
+  }
+
+  /** ほかの鍵のもとで包まれていたもの（前の版から移したもの）を、いまの鍵で包み直す。
+      同じURLがもうあれば1つにまとめる（QRの画像は、無いほうへ移す） */
+  function tidyApps(v) {
+    var away = v.items.filter(function (a) { return a.ks !== v.salt; });
+    if (!away.length) return;
+    var byUrl = Object.create(null), todo = [], drop = [];
+    function want(a) { if (todo.indexOf(a) < 0) todo.push(a); }
+    v.items.forEach(function (a) { if (a.ks === v.salt && !byUrl[a.url]) byUrl[a.url] = a; });
+    away.forEach(function (a) {
+      var same = byUrl[a.url];
+      if (!same) { byUrl[a.url] = a; want(a); return; }
+      if (a.qr && !same.qr) { same.qr = a.qr; want(same); }
+      drop.push(a);
+    });
+    Promise.all(todo.map(function (a) { return Lock.seal(v.key, appBody(a)); })).then(function (boxes) {
+      if (vault !== v) return;
+      var recs = [];
+      todo.forEach(function (a, i) {
+        var cur = Store.get(APPSP, 'vlt', a.id);
+        if (cur && !cur.deleted) recs = recs.concat(packApp(a.id, cur.createdAt, boxes[i], v.salt, v.iter, cur));
+      });
+      drop.forEach(function (a) { var cur = Store.get(APPSP, 'vlt', a.id); if (cur) recs = recs.concat(dropApp(cur)); });
+      saveVlt(recs);
+      refreshApps();
+    }).catch(function () {});
+  }
+
+  /** ほかの鍵のもとで包まれたものを、パスワードで開けてみる。開いた鍵のもとの数を返す（開いたら一覧を描き直す → 包み直す）
+      recs … 試す記録（無ければ全部）。前の版で、端末ごとに決めていたパスワードが同じなら、これで自動で開く */
+  function adoptKeys(v, pass, recs) {
+    var seen = Object.create(null), tries = [];
+    (recs || appRecs()).forEach(function (r) {
+      if (!r.ks || v.keys[r.ks] || seen[r.ks]) return;
+      var box = fullBox(r);
+      if (box === null) return;
+      seen[r.ks] = true;
+      tries.push({ ks: r.ks, ki: r.ki, box: box });
+    });
+    if (!tries.length) return Promise.resolve(0);
+    return Promise.all(tries.map(function (t) {
+      return Lock.key(pass, t.ks, t.ki).then(function (k) {
+        return Lock.open(k, t.box).then(function () { return k; }, function () { return null; });
+      });
+    })).then(function (ks) {
+      var n = 0;
+      ks.forEach(function (k, i) { if (k) { v.keys[tries[i].ks] = k; n++; } });
+      if (n && vault === v) refreshApps();
+      return n;
     });
   }
   function findApp(id) { return vault && vault.items.filter(function (a) { return a.id === id; })[0]; }
@@ -2322,8 +2468,10 @@
     }
     if (v.bad.length) {
       h += '<div class="warnbox">開けない項目が ' + v.bad.length + '件あります（ほかのパスワードで入れたものです）。'
+        + ' <button type="button" class="mini" data-act="openbad">パスワードを入れて開ける</button>'
         + ' <button type="button" class="mini danger" data-act="dropbad">消す</button></div>';
     }
+    if (v.wait) h += '<div class="note">まだ届ききっていない項目が ' + v.wait + '件あります（次の同期で出ます）</div>';
     document.getElementById('appList').innerHTML = h;
     document.getElementById('appsCount').textContent = v.items.length ? v.items.length + '件' : '';
     document.getElementById('appGroups').innerHTML = Object.keys(by).map(function (g) { return '<option value="' + U.esc(g) + '">'; }).join('');
@@ -2332,11 +2480,13 @@
   /* ---------- 生体認証で開ける（Face ID・Touch ID。2026-10-11 ko-dai さん） ----------
      パスワードの代わりに、端末の生体認証で開ける。使うかどうかは端末ごとに選ぶ（使わなければ何も変わらない）
        ・しくみ：端末にパスキーを1つ作る。生体認証が通ったときだけ、パスキーが32バイト（PRF）を返す。
-         その32バイトから鍵を作り、パスワードを包んで app-bio として端末の中（tb.apps）に置く。開けるときは逆の順
+         その32バイトから鍵を作り、パスワードを包んで app-bio として端末の中（tb.apps）に置く。開けるときは逆の順。
+         ★一覧はパソコンとスマホでそろえるが、この箱は端末ごと（パスキーが端末ごとなので）。使うかは端末ごとに選ぶ
        ・★包んだ箱だけでは開かない（生体認証を通さないと鍵が出てこない）。パスワードそのものは、いままでどおり残さない
        ・★パスキーは、端末の「パスワード」の置き場（iCloud キーチェーンなど）に入る。ここだけは、アプリの外に記録が残る。
          入るのは鍵の材料だけで、一覧もパスワードも入らない。使い始める前に、画面でそう断る
-       ・パスワードを変えた・決め直したら app-bio は捨てる（使い直してもらう）
+       ・パスワードを変えた・決め直したら app-bio は捨てる（使い直してもらう）。もう一方の端末で変えたときは、
+         鍵のもとが合わなくなるので、ボタンが出なくなる（bioRec）
        ・PRF の使えない端末・ブラウザでは、ボタンを出さない／使い始めるときに断る */
   var BIO_ID = 'app-bio', KEY_UID = 'tb.bio.uid';
   var bioOk = null;                  // この端末で使えそうか（まだ調べていなければ null）
@@ -2401,18 +2551,23 @@
     if (!h || !b || appsBusy || !bioCan()) return;
     appsBusy = true;
     say('lockMsg', '生体認証を待っています…');
+    var pass = '';
     bioAsk(b).then(Lock.keyFromBytes)
       .then(function (k) { return Lock.open(k, b.box); })
-      .then(function (o) { return Lock.key(String(o.p), h.salt, h.iter); })
+      .then(function (o) { pass = String(o.p); return Lock.key(pass, h.salt, h.iter); })
       .then(function (key) { return Lock.open(key, h.box).then(function () { return key; }); })
       .then(function (key) {
         appsBusy = false;
         say('lockMsg', '');
-        if (view !== 'apps') return;
-        vault = { key: key, salt: h.salt, items: [], bad: [], touched: Date.now() };
-        renderApps();
+        if (view === 'apps') {
+          vault = openVault(key, h);
+          renderApps();
+          adoptKeys(vault, pass).catch(function () {});
+        }
+        pass = '';
       }, function (e) {
         appsBusy = false;
+        pass = '';
         say('lockMsg', (e && (e.noPrf || e.name === 'NotAllowedError') ? bioSay(e) : '生体認証では開けられませんでした') + '。パスワードでも開けられます', true);
       });
   }
@@ -2435,7 +2590,8 @@
         function fail(e) { btn.disabled = false; msg(bioSay(e), true); }
         function finish(prf) {
           return Lock.keyFromBytes(prf).then(function (k) { return Lock.seal(k, { p: pass }); }).then(function (box) {
-            if (vault !== v || lockHead() !== h) throw new Error('ロックがかかりました');
+            var h2 = lockHead();
+            if (vault !== v || !h2 || h2.salt !== h.salt) throw new Error('ロックがかかりました');
             Store.put(APPSP, 'app', { id: BIO_ID, createdAt: Date.now(), cred: made.cred, tr: made.tr, psalt: made.psalt, lock: h.salt, box: box });
             pass = '';
             closeModal(); renderAll(); toast('生体認証で開けられるようにしました');
@@ -2525,8 +2681,9 @@
       input.value = '';
       say('lockMsg', '');
       if (view !== 'apps') return;                  // 待つ間にほかのタブへ移っていたら、開けない
-      vault = { key: key, salt: h.salt, items: [], bad: [], touched: Date.now() };
+      vault = openVault(key, h);
       renderApps();
+      adoptKeys(vault, pass).catch(function () {});   // 前の版で、ほかの端末に同じパスワードで入れていた分も開ける
     }, function () {
       appsBusy = false;
       noteFail(false);
@@ -2545,10 +2702,14 @@
     appsBusy = true;
     say('setMsg', '用意しています…');
     var salt = Lock.newSalt();
-    Lock.key(p1, salt, Lock.ITER).then(function (key) {
+    // もう一方の端末で決めてあるかもしれないので、先に同期して確かめる（つながらなければ、そのまま決める）
+    syncAgain(APPSP).then(function () {
+      if (lockHead()) { var had = new Error('もう一方の端末で決めたパスワードがありました。そのパスワードで開けてください'); had.had = true; throw had; }
+      return Lock.key(p1, salt, Lock.ITER);
+    }).then(function (key) {
       return Lock.seal(key, { check: APP.name }).then(function (box) {
-        Store.put(APPSP, 'app', { id: LOCK_ID, createdAt: Date.now(), salt: salt, iter: Lock.ITER, box: box });
-        if (view === 'apps') vault = { key: key, salt: salt, items: [], bad: [], touched: Date.now() };
+        saveVlt([{ id: LOCK_ID, createdAt: Date.now(), salt: salt, iter: Lock.ITER, box: box }]);
+        if (view === 'apps') vault = openVault(key, { salt: salt, iter: Lock.ITER });
       });
     }).then(function () {
       appsBusy = false;
@@ -2557,7 +2718,19 @@
       renderAll(); toast('ロックを用意しました');
     }, function (e) {
       appsBusy = false;
+      if (e && e.had) { e1.value = ''; e2.value = ''; say('setMsg', ''); renderAll(); say('lockMsg', e.message); return; }
       say('setMsg', 'うまくいきませんでした：' + ((e && e.message) || e), true);
+    });
+  }
+
+  /** いま走っている同期が終わるのを待ってから、もう1回同期する（同期していなければ、すぐ終わる） */
+  function syncAgain(sp) {
+    return new Promise(function (ok) {
+      (function tick() {
+        if (!Sync.enabled()) { ok(); return; }
+        if (Sync.of[sp].state().kind === 'busy') { setTimeout(tick, 200); return; }
+        Sync.of[sp].run(false).then(ok, ok);
+      })();
     });
   }
 
@@ -2575,10 +2748,9 @@
     if (!v) return Promise.reject(new Error('ロックがかかっています'));
     return Lock.seal(v.key, appBody(o)).then(function (box) {
       if (vault !== v) throw new Error('ロックがかかりました');
-      var cur = id ? Store.get(APPSP, 'app', id) : null;
-      var rec = { box: box };
-      if (cur) { rec.id = id; rec.createdAt = cur.createdAt; }
-      Store.put(APPSP, 'app', rec);
+      var cur = id ? Store.get(APPSP, 'vlt', id) : null;
+      if (cur && cur.deleted) cur = null;
+      saveVlt(packApp(cur ? id : newVid(), cur ? cur.createdAt : Date.now(), box, v.salt, v.iter, cur));
     });
   }
 
@@ -2653,9 +2825,10 @@
         m.querySelector('#a-qrauto').onclick = function () { qr = ''; paintQr(); };
         m.querySelector('#a-cancel').onclick = closeModal;
         m.querySelector('#a-del').onclick = function () {
-          Store.remove(APPSP, 'app', id);
+          var cur = Store.get(APPSP, 'vlt', id);
+          try { if (cur) saveVlt(dropApp(cur)); } catch (e) { toast(e.message); return; }
           closeModal(); renderAll();
-          // 消したものはどこにも残らないので、戻すときは同じ中身で入れ直す（開いている間だけ）
+          // 消したものは中身を残さない（受け口にも、消した印だけ）。戻すときは同じ中身で入れ直す（開いている間だけ）
           toast('消しました', function () {
             putApp('', a).then(renderAll).catch(function (e) { toast(e.message || '戻せませんでした'); });
           });
@@ -2761,11 +2934,13 @@
           if (read.bad && !global.confirm('読めない行が ' + read.bad + '行あります。\n読めた分だけ足しますか？')) return;
           Promise.all(todo.map(function (t) { return Lock.seal(v.key, t.body); })).then(function (boxes) {
             if (vault !== v) throw new Error('ロックがかかりました');
-            Store.putApps(todo.map(function (t, i) {
-              var rec = { box: boxes[i] }, old = t.cur && Store.get(APPSP, 'app', t.cur.id);
-              if (old) { rec.id = old.id; rec.createdAt = old.createdAt; }
-              return rec;
-            }));
+            var recs = [];
+            todo.forEach(function (t, i) {
+              var old = t.cur && Store.get(APPSP, 'vlt', t.cur.id);
+              if (old && old.deleted) old = null;
+              recs = recs.concat(packApp(old ? old.id : newVid(), old ? old.createdAt : Date.now(), boxes[i], v.salt, v.iter, old));
+            });
+            saveVlt(recs);
             closeModal(); renderAll();
             toast([add ? add + '件足しました' : '', fix ? fix + '件直しました' : ''].filter(Boolean).join('・'));
           }).catch(function (e) { toast(e.message || '残せませんでした'); });
@@ -2782,7 +2957,7 @@
       + '<div class="f"><label for="p-old">今のパスワード</label><input type="password" id="p-old" autocomplete="current-password"></div>'
       + '<div class="f"><label for="p-new">新しいパスワード（' + Lock.MIN + '文字以上）</label><input type="password" id="p-new" autocomplete="new-password"></div>'
       + '<div class="f"><label for="p-new2">もう一度</label><input type="password" id="p-new2" autocomplete="new-password"></div>'
-      + '<div class="hint">変わるのは、この端末のパスワードだけです。</div>'
+      + '<div class="hint">パソコンとスマホの両方で、新しいパスワードに変わります。生体認証を使っている端末では、使い直してください。</div>'
       + '<div class="acts"><button type="button" id="p-cancel">やめる</button><button type="button" class="go" id="p-ok">変える</button></div>',
       function (m) {
         m.querySelector('#p-cancel').onclick = closeModal;
@@ -2797,7 +2972,9 @@
             .then(function () {
               // いまの鍵で開くものだけを包み直す（開かないものは、そのまま残る）
               return Promise.all(recs.map(function (r) {
-                return Lock.open(v.key, r.box).then(function (o) { kept.push({ rec: r, o: o }); }, function () {});
+                var k = v.keys[r.ks || v.salt], box = fullBox(r);
+                if (!k || box === null) return null;
+                return Lock.open(k, box).then(function (o) { kept.push({ rec: r, o: o }); }, function () {});
               }));
             })
             .then(function () { return Lock.key(p1, salt, Lock.ITER); })
@@ -2808,15 +2985,15 @@
             .then(function (boxes) {
               if (vault !== v) throw new Error('ロックがかかりました');
               // ★鍵のもとと中身を、1回でまとめて書く（途中で止まると、組が合わなくなるため）
-              Store.putApps(kept.map(function (x, i) {
-                return { id: x.rec.id, createdAt: x.rec.createdAt, box: boxes[i + 1] };
-              }).concat([{ id: LOCK_ID, createdAt: h.createdAt, salt: salt, iter: Lock.ITER, box: boxes[0] }]));
-              v.key = key2; v.salt = salt;
+              var out = [];
+              kept.forEach(function (x, i) { out = out.concat(packApp(x.rec.id, x.rec.createdAt, boxes[i + 1], salt, Lock.ITER, x.rec)); });
+              saveVlt(out.concat([{ id: LOCK_ID, createdAt: h.createdAt, salt: salt, iter: Lock.ITER, box: boxes[0] }]));
+              v.key = key2; v.salt = salt; v.iter = Lock.ITER; v.keys[salt] = key2;
               // 生体認証の箱は、前のパスワードを包んだものなので捨てる（使い直してもらう）
               var hadBio = !!Store.get(APPSP, 'app', BIO_ID);
               if (hadBio) Store.remove(APPSP, 'app', BIO_ID);
               closeModal(); renderAll();
-              toast('パスワードを変えました' + (hadBio ? '（生体認証は、もう一度「使う」を押してください）' : ''));
+              toast('パスワードを変えました（もう一方の端末でも、新しいパスワードになります）' + (hadBio ? '。生体認証は、もう一度「使う」を押してください' : ''));
             })
             .catch(function (e) {
               btn.disabled = false; btn.textContent = '変える';
@@ -2829,11 +3006,12 @@
 
   /** パスワードを忘れたとき。暗号は開けられないので、一覧ごと消して決め直す */
   function resetApps() {
-    if (!global.confirm('パスワードを決め直します。\n\nこの端末の一覧（' + appRecs().length + '件）は、暗号を開けられないので全部消えます。\n'
-      + 'ほかのどこにも残していないので、戻せません。\n\n消してよろしいですか？')) return;
-    appRecs().forEach(function (r) { Store.remove(APPSP, 'app', r.id); });
-    Store.remove(APPSP, 'app', LOCK_ID);
-    Store.remove(APPSP, 'app', BIO_ID);
+    if (!global.confirm('パスワードを決め直します。\n\n一覧（' + appRecs().length + '件）は、暗号を開けられないので全部消えます。\n'
+      + 'パソコンとスマホの両方から消えて、戻せません。\n\n消してよろしいですか？')) return;
+    try { saveVlt(Store.list(APPSP, 'vlt').map(function (r) { return { id: r.id, deleted: true }; })); }
+    catch (e) { toast(e.message); return; }
+    // この端末の生体認証の箱と、前の版の一覧も捨てる
+    Store.list(APPSP, 'app').forEach(function (r) { Store.remove(APPSP, 'app', r.id); });
     noteFail(true);
     lockApps();
     renderAll(); toast('一覧を消しました。パスワードを決め直せます');
@@ -2841,9 +3019,76 @@
 
   function dropBadApps() {
     if (!vault || !vault.bad.length) return;
-    if (!global.confirm('開けない ' + vault.bad.length + '件を消します。中身は確かめられません。よろしいですか？')) return;
-    vault.bad.forEach(function (id) { Store.remove(APPSP, 'app', id); });
+    if (!global.confirm('開けない ' + vault.bad.length + '件を消します。中身は確かめられません。\nパソコンとスマホの両方から消えます。よろしいですか？')) return;
+    var recs = [];
+    vault.bad.forEach(function (r) { recs = recs.concat(dropApp(r)); });
+    try { saveVlt(recs); } catch (e) { toast(e.message); return; }
     renderAll(); toast('消しました');
+  }
+
+  /** 開けない項目を、そのときのパスワードで開ける（前の版で、もう一方の端末に別のパスワードで入れていたもの） */
+  function openBadApps() {
+    var v = vault;
+    if (!v || !v.bad.length) return;
+    modal('<h2>ほかのパスワードで開ける</h2>'
+      + '<div class="hint">前に、もう一方の端末で別のパスワードを使っていたときに入れた項目です。'
+      + 'そのときのパスワードを入れると、いまのパスワードで包み直して一覧に戻します。</div>'
+      + '<div class="f"><label for="o-pass">そのときのパスワード</label><input type="password" id="o-pass" autocomplete="off"></div>'
+      + '<div class="lockmsg" id="o-msg"></div>'
+      + '<div class="acts"><button type="button" id="o-cancel">やめる</button><button type="button" class="go" id="o-ok">開ける</button></div>',
+      function (m) {
+        var btn = m.querySelector('#o-ok'), el = m.querySelector('#o-pass');
+        function msg(text, bad) { var e = m.querySelector('#o-msg'); e.textContent = text || ''; e.classList.toggle('bad', !!bad); }
+        m.querySelector('#o-cancel').onclick = closeModal;
+        btn.onclick = function () {
+          var pass = el.value;
+          if (!pass) return;
+          btn.disabled = true; msg('開けています…');
+          adoptKeys(v, pass, v.bad).then(function (n) {
+            pass = ''; el.value = '';
+            if (!n) { btn.disabled = false; msg('開けられませんでした（パスワードが違います）', true); return; }
+            closeModal(); toast('開けました。いまのパスワードで包み直します');
+          }, function () { pass = ''; btn.disabled = false; msg('開けられませんでした', true); });
+        };
+        setTimeout(function () { el.focus(); }, 50);
+      });
+    appsModal = true;
+  }
+
+  /* ---------- 前の版から移す（2026-10-30） ----------
+     前の版は、端末ごとに tb.apps に一覧を置いていた（app-lock と app-xxxx）。この画面を開いてから同期が1回すんだら、
+     'vlt' の種類へ移して受け口へ送る（暗号のまま。中身は開けずに、箱をそのまま移す）
+       ・受け口にまだ鍵のもとが無ければ、この端末のもの（＝パスワード）をそのまま使う → 生体認証も、そのまま使える
+       ・もう一方の端末が先に移していれば、そちらのパスワードになる。この端末の項目は、この端末の鍵のもと（ks）のまま送り、
+         開けたときに、同じパスワードなら自動で（adoptKeys）、違えば「パスワードを入れて開ける」で、いまの鍵で包み直す
+       ・同期していない端末（つなぎ先が無い）では、待たずに移す。★つないである端末は、同期がうまくいくまで移さない
+         （つながる前に移すと、送るときに、もう一方の端末のパスワードを上書きしてしまうため。URLの一覧なので、
+         どのみち電波が無いと開けない） */
+  var OLD_LOCK = 'app-lock';
+  function oldLock() { var L = Store.get(APPSP, 'app', OLD_LOCK); return L && L.salt && L.box ? L : null; }
+  /** 移した（移すものが無い）なら true。1回目の同期を待っている間は false */
+  function moveOldVault() {
+    var L = oldLock();
+    if (!L) return true;
+    if (Sync.enabled() && Store.meta(APPSP).lastSyncAt < bootAt) return false;
+    var h = lockHead(), recs = [];
+    var olds = Store.list(APPSP, 'app').filter(function (r) { return r.id !== OLD_LOCK && r.id !== BIO_ID && r.box; });
+    if (!h) recs.push({ id: LOCK_ID, createdAt: L.createdAt || Date.now(), salt: L.salt, iter: L.iter, box: L.box });
+    olds.forEach(function (r) {
+      recs = recs.concat(packApp('vlt-' + String(r.id).replace(/^app-/, ''), r.createdAt || Date.now(), String(r.box), L.salt, L.iter, null));
+    });
+    try { saveVlt(recs); } catch (e) { return true; }     // 書けなければ、前の版のまま置いておく（次に開いたときに、もう一度）
+    // ★先に移した先を書いてから、もとを片づける（途中で止まっても、中身がどちらにも無い状態にしない）
+    olds.concat([L]).forEach(function (r) { Store.remove(APPSP, 'app', r.id); });
+    var b = Store.get(APPSP, 'app', BIO_ID);
+    if (b && h && b.lock !== h.salt) Store.remove(APPSP, 'app', BIO_ID);   // もう一方のパスワードになったので、この箱は使えない
+    return true;
+  }
+  /** 個人の側の同期が1回終わるたびに（前の版の一覧が残っていれば、ここで移す） */
+  function appsAfterSync() {
+    if (!oldLock() || Sync.of[APPSP].state().kind === 'busy') return;
+    if (moveOldVault()) say('lockMsg', '');
+    if (view === 'apps') renderApps();
   }
 
   function copyText(text) {
@@ -3069,6 +3314,10 @@
     Sync.onChange = function (sp) {
       if (sp === space()) paintSync();
       if (view === 'set') renderSettings();
+      if (Sync.of[sp].state().kind !== 'busy') {
+        movePrefs(sp);
+        if (sp === APPSP) appsAfterSync();
+      }
     };
     Sync.onData = function (sp) { if (sp === space()) renderAll(); };
     modalWrap = document.getElementById('modalWrap');
@@ -3160,7 +3409,7 @@
     setInterval(function () { if (view === 'plan' && modalWrap.hidden) renderPlan(); }, 60000);
     paintAddOpts();
     /* 並び替えと絞り込み */
-    document.getElementById('tvSort').addEventListener('change', function (e) { tv().sort = e.target.value; Store.saveUi(); renderTasks(); });
+    document.getElementById('tvSort').addEventListener('change', function (e) { var v = tv(); v.sort = e.target.value; tvSave(v); renderTasks(); });
     document.getElementById('tvFilterBtn').onclick = function () {
       var p = document.getElementById('tvPanel');
       p.hidden = !p.hidden;
@@ -3172,7 +3421,7 @@
       if (!b) return;
       var v = tv(), g = b.closest('[data-group]').dataset.group, i = v[g].indexOf(b.dataset.v);
       if (i >= 0) v[g].splice(i, 1); else v[g].push(b.dataset.v);
-      Store.saveUi(); paintTaskView(); renderTasks();
+      tvSave(v); renderTasks();
     });
     document.getElementById('tvQuery').addEventListener('input', function (e) { tvQuery[space()] = e.target.value; renderTasks(); });
 
@@ -3303,6 +3552,7 @@
       var b = e.target.closest('[data-act]');
       if (!b || !vault) return;
       if (b.dataset.act === 'dropbad') { dropBadApps(); return; }
+      if (b.dataset.act === 'openbad') { openBadApps(); return; }
       var row = b.closest('.arow');
       var a = row && vault.items.filter(function (x) { return x.id === row.dataset.id; })[0];
       if (!a) return;
@@ -3338,6 +3588,7 @@
     applySpace();
     show(Store.ui().view);
     Sync.start();
+    Store.SPACES.forEach(movePrefs);   // 同期していない端末は、ここで移す（同期している端末は、1回すんでから）
     checkVersion(true);
     diemImport(false);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) diemImport(false); });
