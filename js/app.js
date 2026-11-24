@@ -1679,7 +1679,7 @@
       + '★Diem で「2人で共有」にした予定だけが読めます（「自分だけ」の予定は、Diem の外に出ないため）。</div>'
       + '<div class="f"><label for="dm-pin">Diem の合言葉</label><input type="text" id="dm-pin" autocapitalize="off" autocorrect="off" spellcheck="false" value="' + U.esc(c.pin || '') + '"></div>'
       + '<div class="f"><label for="dm-me">Diem での自分の名前（Diem の設定の「自分の名前」と同じに）</label><input type="text" id="dm-me" value="' + U.esc(c.me || '') + '"></div>'
-      + '<div class="f"><label for="dm-word">休みの予定の言葉（題にこの言葉がふくまれる予定を休みとして読む）</label><input type="text" id="dm-word" value="' + U.esc(c.word || '休み') + '"></div>'
+      + '<div class="f"><label for="dm-word">休みの予定の言葉（題にこの言葉が含まれる予定を休みとして読む）</label><input type="text" id="dm-word" value="' + U.esc(c.word || '休み') + '"></div>'
       + '<details class="f"><summary class="hint">つなぎ先を手で入れる（普段は空のまま）</summary><input type="text" id="dm-url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec" value="' + U.esc(c.url || '') + '"></details>'
       + '<div class="acts">' + (c.pin ? '<button type="button" class="del" id="dm-off">やめる</button>' : '')
       + '<button type="button" id="dm-cancel">閉じる</button><button type="button" class="go" id="dm-ok">つないで読む</button></div>',
@@ -2625,7 +2625,7 @@
             made = { cred: Lock.b64(new Uint8Array(c.rawId)), psalt: psalt, tr: (c.response && c.response.getTransports && c.response.getTransports()) || null };
             if (prf) return finish(prf);
             if (ext && ext.prf && ext.prf.enabled === false) {
-              var e = new Error('この端末（またはブラウザ）では、生体認証での解除は使えません。いま作られたパスキーは、端末の「パスワード」から消してください');
+              var e = new Error('この端末（またはブラウザ）では、生体認証での解除は使えません。今作られたパスキーは、端末の「パスワード」から消してください');
               e.noPrf = true; throw e;
             }
             // 作ったときには32バイトを返さない端末がある（iPhone など）。続けてもう一度、生体認証でもらう。
@@ -2670,7 +2670,7 @@
     var h = lockHead(), input = document.getElementById('lockPass'), pass = input.value;
     if (!h || appsBusy || !pass) return;
     var left = waitLeft();
-    if (left) { say('lockMsg', '何度も間違えたので、あと' + waitText(left) + '待ってください', true); return; }
+    if (left) { say('lockMsg', '何度も間違えたので、後' + waitText(left) + '待ってください', true); return; }
     appsBusy = true;
     say('lockMsg', '開けています…');
     Lock.key(pass, h.salt, h.iter).then(function (key) {
@@ -2688,7 +2688,7 @@
       appsBusy = false;
       noteFail(false);
       var w = waitLeft();
-      say('lockMsg', 'パスワードが違います' + (w ? '。あと' + waitText(w) + '待ってください' : ''), true);
+      say('lockMsg', 'パスワードが違います' + (w ? '。後' + waitText(w) + '待ってください' : ''), true);
       input.select();
     });
   }
@@ -3230,7 +3230,7 @@
       + '<input type="text" id="c-url" value="' + U.esc(c.url || Sync.url()) + '" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec"></div>'
       + '<div class="f"><label for="c-pin">合言葉（PIN）</label>'
       + '<input type="text" id="c-pin" value="' + U.esc(c.pin) + '" autocapitalize="off" autocorrect="off" spellcheck="false"></div>'
-      + '<div class="hint">つないだあと、この端末の中のもの（個人も会社も）を受け口へ送ります。</div>'
+      + '<div class="hint">つないだ後、この端末の中のもの（個人も会社も）を受け口へ送ります。</div>'
       + '<div class="acts">'
       + (Sync.enabled() ? '<button type="button" class="del" id="c-off">つなぐのをやめる</button>' : '')
       + '<button type="button" id="c-cancel">やめる</button>'
@@ -3249,7 +3249,7 @@
           var p = root.querySelector('#c-pin').value.trim();
           if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(u)) { global.alert('つなぎ先は https://script.google.com/…/exec の形です'); return; }
           if (!p) { global.alert('合言葉を入れてください'); return; }
-          var btn = this; btn.disabled = true; btn.textContent = 'たしかめています…';
+          var btn = this; btn.disabled = true; btn.textContent = '確かめています…';
           Sync.test(u, p).then(function () {
             c.url = (u === (APP.syncUrl || '')) ? '' : u;
             c.pin = p;

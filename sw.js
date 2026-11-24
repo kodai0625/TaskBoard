@@ -2,7 +2,7 @@
    ・いつもサーバーを先に見に行き、取れたときだけ控えを入れ替えます（つながらないときは控えを出す）
    ・res.ok を必ず見ます。見ないと、エラー画面そのものを控えてしまいます
    ・GitHub が落ちていて 500 などが返ったときも、控えがあれば控えを出します */
-var VERSION = 'tb-ae2957e5';
+var VERSION = 'tb-74af9a7d';
 
 self.addEventListener('install', function (e) {
   self.skipWaiting();
