@@ -2670,7 +2670,7 @@
     var h = lockHead(), input = document.getElementById('lockPass'), pass = input.value;
     if (!h || appsBusy || !pass) return;
     var left = waitLeft();
-    if (left) { say('lockMsg', '何度も間違えたので、後' + waitText(left) + '待ってください', true); return; }
+    if (left) { say('lockMsg', '何度も間違えたので、あと' + waitText(left) + '待ってください', true); return; }
     appsBusy = true;
     say('lockMsg', '開けています…');
     Lock.key(pass, h.salt, h.iter).then(function (key) {
@@ -2688,7 +2688,7 @@
       appsBusy = false;
       noteFail(false);
       var w = waitLeft();
-      say('lockMsg', 'パスワードが違います' + (w ? '。後' + waitText(w) + '待ってください' : ''), true);
+      say('lockMsg', 'パスワードが違います' + (w ? '。あと' + waitText(w) + '待ってください' : ''), true);
       input.select();
     });
   }
