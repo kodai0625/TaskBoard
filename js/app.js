@@ -210,7 +210,7 @@
   var toastTimer = null;
   function toast(msg, undo) {
     var t = document.getElementById('toast');
-    t.innerHTML = U.esc(msg) + (undo ? ' <button type="button" class="undo">もどす</button>' : '');
+    t.innerHTML = U.esc(msg) + (undo ? ' <button type="button" class="undo">戻す</button>' : '');
     t.hidden = false;
     if (undo) t.querySelector('.undo').onclick = function () { t.hidden = true; undo(); };
     clearTimeout(toastTimer);
@@ -222,10 +222,10 @@
     var el = document.getElementById('syncBar');
     var S = Sync.of[space()];
     var s = S.state();
-    var text = { off: '端末の中だけ', busy: '同期中…', pending: '未送信 ' + s.pending + '件', error: '送れません', ok: '同期ずみ' }[s.kind];
+    var text = { off: '端末の中だけ', busy: '同期中…', pending: '未送信 ' + s.pending + '件', error: '送れません', ok: '同期済み' }[s.kind];
     if (s.kind === 'ok' && s.at) {
       var d = new Date(s.at);
-      text = '同期ずみ ' + U.pad(d.getHours()) + ':' + U.pad(d.getMinutes());
+      text = '同期済み ' + U.pad(d.getHours()) + ':' + U.pad(d.getMinutes());
     }
     el.className = 'syncbar ' + s.kind;
     el.textContent = text;
@@ -347,10 +347,10 @@
     var sub = prioBadge(t) + doBadge(t) + dueBadge(t.due) + (t.time ? '<span class="due">' + timeLabel(t) + '</span>' : '')
       + (t.note ? '<span class="hasnote">メモあり</span>' : '');
     return '<div class="trow' + (t.done ? ' done' : '') + '" data-id="' + U.esc(t.id) + '" data-prio="' + prioOf(t) + '">'
-      + '<button type="button" class="ck" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
+      + '<button type="button" class="ck" data-act="toggle" aria-label="' + (t.done ? '未完了に戻す' : '済みにする') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       + '</button>'
-      + '<button type="button" class="tbody" data-act="toggle" aria-label="' + (t.done ? '未完了にもどす' : '済みにする') + '">'
+      + '<button type="button" class="tbody" data-act="toggle" aria-label="' + (t.done ? '未完了に戻す' : '済みにする') + '">'
       + '<span class="ttl">' + U.esc(t.title) + '</span>'
       + (sub ? '<span class="sub">' + sub + '</span>' : '')
       + '</button>'
@@ -595,7 +595,7 @@
       if (showDone) {
         var shown = done.slice(0, 50);
         h += '<div class="card list">' + shown.map(taskRow).join('') + '</div>';
-        if (done.length > shown.length) h += '<div class="empty">ほか ' + (done.length - shown.length) + '件（古いもの）</div>';
+        if (done.length > shown.length) h += '<div class="empty">他 ' + (done.length - shown.length) + '件（古いもの）</div>';
       }
     }
     document.getElementById('taskList').innerHTML = h;
@@ -630,7 +630,7 @@
     document.getElementById('addDo').value = addDo;
     // 時刻・くり返し
     document.getElementById('addMore').hidden = !moreOpen;
-    document.getElementById('addMoreBtn').textContent = (moreOpen ? '▾' : '▸') + ' 時刻・くり返し'
+    document.getElementById('addMoreBtn').textContent = (moreOpen ? '▾' : '▸') + ' 時刻・繰り返し'
       + (addTime || addRepeat ? '（' + [addTime, { daily: '毎日', weekly: '毎週', monthly: '毎月 ' + mdayLabel(addMday || new Date().getDate()) }[addRepeat] || ''].filter(Boolean).join('・') + '）' : '');
     document.getElementById('addTime').value = addTime;
     document.getElementById('addDur').innerHTML = durOptions(addDur);
@@ -679,7 +679,7 @@
     Store.put(sp, 'task', t);
     renderAll();
     // 行を押すだけで入れ替わるので、どちら向きでも「もどす」を出す（押しまちがえたとき、すぐ戻せるように）
-    toast(t.done ? '済みにしました' : '未完了にもどしました', function () {
+    toast(t.done ? '済みにしました' : '未完了に戻しました', function () {
       var cur = Store.get(sp, 'task', id);
       if (!cur) return;
       cur.done = prevDone; cur.doneAt = prevAt;
@@ -700,14 +700,14 @@
       '<h2>' + U.esc(label(sp)) + 'の' + (rep ? '習慣' : 'タスク') + '</h2>'
       + '<div class="f"><label for="e-title">やること</label><input type="text" id="e-title" value="' + U.esc(t.title) + '"></div>'
       + '<div class="f"><label>重要度</label>' + prioSeg('e-prio', prioOf(t)) + '</div>'
-      + '<div class="f"><label>くり返し</label><div class="seg3 rep" id="e-rep">'
+      + '<div class="f"><label>繰り返し</label><div class="seg3 rep" id="e-rep">'
       + [['', 'なし'], ['daily', '毎日'], ['weekly', '毎週'], ['monthly', '毎月']].map(function (r) {
           return '<button type="button" data-rep="' + r[0] + '"' + (r[0] === rep ? ' class="on"' : '') + '>' + r[1] + '</button>';
         }).join('') + '</div>'
       + '<div class="edays"' + (rep === 'weekly' ? '' : ' hidden') + '>' + daysPicker('e-days', t.days || [new Date().getDay()]) + '</div>'
       + '<div class="emday"' + (rep === 'monthly' ? '' : ' hidden') + '><div class="timepick">毎月 <select id="e-mday">'
       + mdayOptions(t.mday || (t.due ? U.parse(t.due).getDate() : new Date().getDate())) + '</select></div></div>'
-      + (rep ? '<div class="hint rulehint">くり返しの決まりを変えると、「今回だけ」の変更は消えます</div>' : '') + '</div>'
+      + (rep ? '<div class="hint rulehint">繰り返しの決まりを変えると、「今回だけ」の変更は消えます</div>' : '') + '</div>'
       + (rep ? '<div class="f emove"><label>今回だけ日を変える</label><div class="mvbox"></div></div>' : '')
       + '<div class="f"><label for="e-time">時刻と長さ</label><div class="f2">'
       + '<input type="time" id="e-time" step="300" value="' + U.esc(t.time || '') + '">'
@@ -1248,7 +1248,7 @@
       + '<button type="button" data-off="1"' + (st.off ? ' class="on"' : '') + '>休み</button></div>'
       + (places.length ? '' : '<div class="hint" style="margin-top:6px">職場の決まりがまだ届いていません（同期を待つか、時間を手で入れてください）</div>') + '</div>'
       + '<div id="wk-body"></div>'
-      + '<div class="hint">決めると、この日の予定を組みます（出勤の前に入れられるものも入れます。あとから自分で直せます）。</div>'
+      + '<div class="hint">決めると、この日の予定を組みます（出勤の前に入れられるものも入れます。後から自分で直せます）。</div>'
       + '<div class="acts">' + (w ? '<button type="button" class="del" id="wk-del">消す</button>' : '')
       + '<button type="button" id="wk-cancel">やめる</button><button type="button" class="go" id="wk-ok">決める</button></div>',
       function (m) {
@@ -1395,9 +1395,9 @@
       + '<div class="f"><label for="pc-wake">予定が遅い日・無い日に起きる時刻</label><input type="time" id="pc-wake" step="300" value="' + c.wake + '"></div>'
       + '<div class="f"><label for="pc-prep">起きてから動き出すまで（分）</label><input type="text" inputmode="numeric" id="pc-prep" value="' + c.prepMin + '"></div>'
       + '<div class="f"><label for="pc-wind">寝る前のゆとり（分）</label><input type="text" inputmode="numeric" id="pc-wind" value="' + c.windMin + '"></div>'
-      + '<div class="f"><label for="pc-gap">予定と予定のあいだ（分）</label><input type="text" inputmode="numeric" id="pc-gap" value="' + c.gapMin + '"></div>'
+      + '<div class="f"><label for="pc-gap">予定と予定の間（分）</label><input type="text" inputmode="numeric" id="pc-gap" value="' + c.gapMin + '"></div>'
       + '<div class="hint">パソコンとスマホで同じ決まりを使います。通勤の時間は職場ごとに決まっています。タスクの長さは、タスクの「時刻と長さ」（無ければ30分）を使います。</div>'
-      + '<div class="acts"><button type="button" id="pc-reset">はじめの値</button><button type="button" id="pc-cancel">やめる</button><button type="button" class="go" id="pc-ok">決める</button></div>',
+      + '<div class="acts"><button type="button" id="pc-reset">初めの値</button><button type="button" id="pc-cancel">やめる</button><button type="button" class="go" id="pc-ok">決める</button></div>',
       function (m) {
         m.querySelector('#pc-cancel').onclick = closeModal;
         m.querySelector('#pc-reset').onclick = function () {
@@ -1423,7 +1423,7 @@
     if (!w) work = '<span class="pv dim">まだ入れていません</span><button type="button" class="mini" data-act="pwork">入れる</button>';
     else if (w.off) work = '<span class="pv">休み' + (w.from === 'diem' ? '<small>（Diem から）</small>' : '') + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
     else work = '<span class="pv">' + (ws ? ws.segs.map(function (g) { return '<b>' + U.esc(segName(g)) + '</b> ' + clock(g.s) + '〜' + clock(g.e); }).join(' → ') : '')
-      + (w.clockOut ? '<small>（退勤ずみ）</small>' : ws && ws.e > 1440 ? '<small>（次の日まで）</small>' : '')
+      + (w.clockOut ? '<small>（退勤済み）</small>' : ws && ws.e > 1440 ? '<small>（次の日まで）</small>' : '')
       + (ws && (ws.comIn || ws.comOut) ? '<small>・通勤 片道' + (ws.comIn === ws.comOut ? ws.comIn : ws.comIn + '／' + ws.comOut) + '分</small>' : '')
       + (ws && ws.segs.length > 1 && ws.move ? '<small>・店の移動 ' + ws.move + '分</small>' : '')
       + '</span><button type="button" class="mini" data-act="pwork">直す</button>';
@@ -1680,7 +1680,7 @@
       + '<div class="f"><label for="dm-pin">Diem の合言葉</label><input type="text" id="dm-pin" autocapitalize="off" autocorrect="off" spellcheck="false" value="' + U.esc(c.pin || '') + '"></div>'
       + '<div class="f"><label for="dm-me">Diem での自分の名前（Diem の設定の「自分の名前」と同じに）</label><input type="text" id="dm-me" value="' + U.esc(c.me || '') + '"></div>'
       + '<div class="f"><label for="dm-word">休みの予定の言葉（題にこの言葉がふくまれる予定を休みとして読む）</label><input type="text" id="dm-word" value="' + U.esc(c.word || '休み') + '"></div>'
-      + '<details class="f"><summary class="hint">つなぎ先を手で入れる（ふだんは空のまま）</summary><input type="text" id="dm-url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec" value="' + U.esc(c.url || '') + '"></details>'
+      + '<details class="f"><summary class="hint">つなぎ先を手で入れる（普段は空のまま）</summary><input type="text" id="dm-url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec" value="' + U.esc(c.url || '') + '"></details>'
       + '<div class="acts">' + (c.pin ? '<button type="button" class="del" id="dm-off">やめる</button>' : '')
       + '<button type="button" id="dm-cancel">閉じる</button><button type="button" class="go" id="dm-ok">つないで読む</button></div>',
       function (m) {
@@ -1737,7 +1737,7 @@
       ? (m.talkedAt ? U.md(U.iso(new Date(m.talkedAt))) + 'に話した' : '話した')
       : U.md(U.iso(new Date(m.createdAt || m.updatedAt))) + 'に書いた';
     return '<div class="trow ag' + (m.talked ? ' done' : '') + '" data-id="' + U.esc(m.id) + '">'
-      + '<button type="button" class="ck" data-act="agtoggle" aria-label="' + (m.talked ? 'まだ話していないにもどす' : '話した') + '">'
+      + '<button type="button" class="ck" data-act="agtoggle" aria-label="' + (m.talked ? 'まだ話していないに戻す' : '話した') + '">'
       + '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       + '</button>'
       + '<button type="button" class="tbody" data-act="agtoggle"><span class="ttl">' + U.esc(m.text) + '</span>'
@@ -1760,7 +1760,7 @@
       h += '<button type="button" class="donehead" data-act="showtalked">' + (showTalked ? '▾' : '▸') + ' 話した議題 ' + talked.length + '件</button>';
       if (showTalked) {
         h += '<div class="aglist">' + talked.map(agendaRow).join('') + '</div>'
-          + '<div class="buyfoot"><button type="button" class="mini danger" data-act="agclear">話した議題を片づける</button></div>';
+          + '<div class="buyfoot"><button type="button" class="mini danger" data-act="agclear">話した議題を片付ける</button></div>';
       }
     }
     document.getElementById('agendaList').innerHTML = h;
@@ -1783,7 +1783,7 @@
     m.talkedAt = m.talked ? Date.now() : 0;
     Store.put(AGSP, 'memo', m);
     renderAll();
-    toast(m.talked ? '話したにしました' : 'まだ話していないにもどしました', function () {
+    toast(m.talked ? '話したにしました' : 'まだ話していないに戻しました', function () {
       var cur = Store.get(AGSP, 'memo', id);
       if (!cur) return;
       cur.talked = prev.talked; cur.talkedAt = prev.at;
@@ -1871,7 +1871,7 @@
       + '<div class="hint">書いた日：' + U.esc(U.stamp(memo.createdAt || memo.updatedAt)) + '</div>'
       + '<div class="acts">'
       + '<button type="button" class="del" id="m-del">消す</button>'
-      + (isAgenda(memo) ? '<button type="button" id="m-plain">ふつうのメモにする</button>' : '')
+      + (isAgenda(memo) ? '<button type="button" id="m-plain">普通のメモにする</button>' : '')
       + '<button type="button" id="m-task">タスクにする</button>'
       + '<button type="button" class="go" id="m-ok">直す</button>'
       + '</div>',
@@ -1893,7 +1893,7 @@
           memo.agenda = false; delete memo.talked; delete memo.talkedAt;
           memo.text = m.querySelector('#m-text').value.trim() || memo.text;
           Store.put(sp, 'memo', memo);
-          closeModal(); renderAll(); toast('ふつうのメモにしました');
+          closeModal(); renderAll(); toast('普通のメモにしました');
         };
         m.querySelector('#m-task').onclick = function () {
           // 1行目をやることに、残りをタスクのメモに。★同じ入れ物（個人なら個人）の中だけで動かす
@@ -2002,11 +2002,11 @@
 
     var h = '<div class="bfilter">'
       + '<button type="button" class="chip' + (f.need ? ' on' : '') + '" data-fneed="1">今回買うもの <b>' + buyNeedCount() + '</b></button>'
-      + (stores.length ? '<div class="seg3 bstore">' + [{ id: '', name: 'すべて' }].concat(stores).map(function (x) {
+      + (stores.length ? '<div class="seg3 bstore">' + [{ id: '', name: '全て' }].concat(stores).map(function (x) {
           return '<button type="button" data-fstore="' + U.esc(x.id) + '"' + (f.store === x.id ? ' class="on"' : '') + '>' + U.esc(x.name) + '</button>';
         }).join('') + '</div>' : '')
       + '</div>'
-      + '<div class="bplaces">' + [{ id: '', text: 'すべての買い出し先' }].concat(places, others.length ? [{ id: '-', text: 'その他' }] : []).map(function (p) {
+      + '<div class="bplaces">' + [{ id: '', text: '全ての買い出し先' }].concat(places, others.length ? [{ id: '-', text: 'その他' }] : []).map(function (p) {
           return '<button type="button" class="chip' + (f.place === p.id ? ' on' : '') + '" data-fplace="' + U.esc(p.id) + '">' + U.esc(p.text) + '</button>';
         }).join('') + '</div>';
     if (!stores.length) {
@@ -2467,7 +2467,7 @@
       h = '<div class="empty art">' + STAR + '<b>まだアプリはありません</b>上の欄に、名称とURLを書いて足してください</div>';
     }
     if (v.bad.length) {
-      h += '<div class="warnbox">開けない項目が ' + v.bad.length + '件あります（ほかのパスワードで入れたものです）。'
+      h += '<div class="warnbox">開けない項目が ' + v.bad.length + '件あります（他のパスワードで入れたものです）。'
         + ' <button type="button" class="mini" data-act="openbad">パスワードを入れて開ける</button>'
         + ' <button type="button" class="mini danger" data-act="dropbad">消す</button></div>';
     }
@@ -2581,7 +2581,7 @@
       + '<div class="hint">次からは、パスワードの代わりに Face ID・Touch ID で開けられます（パスワードも、そのまま使えます）。<br>'
       + '★この端末の「パスワード」の置き場に、パスキーが1つ保存されます（iCloud キーチェーンを使っていれば、そこにも入ります）。'
       + '入るのは鍵の材料だけで、一覧の中身とパスワードは入りません。</div>'
-      + '<div class="f" id="bio-f"><label for="bio-pass">いまのパスワード</label><input type="password" id="bio-pass" autocomplete="current-password"></div>'
+      + '<div class="f" id="bio-f"><label for="bio-pass">今のパスワード</label><input type="password" id="bio-pass" autocomplete="current-password"></div>'
       + '<div class="lockmsg" id="bio-msg"></div>'
       + '<div class="acts"><button type="button" id="bio-cancel">やめる</button><button type="button" class="go" id="bio-ok">次へ</button></div>',
       function (m) {
@@ -2591,7 +2591,7 @@
         function finish(prf) {
           return Lock.keyFromBytes(prf).then(function (k) { return Lock.seal(k, { p: pass }); }).then(function (box) {
             var h2 = lockHead();
-            if (vault !== v || !h2 || h2.salt !== h.salt) throw new Error('ロックがかかりました');
+            if (vault !== v || !h2 || h2.salt !== h.salt) throw new Error('ロックが掛かりました');
             Store.put(APPSP, 'app', { id: BIO_ID, createdAt: Date.now(), cred: made.cred, tr: made.tr, psalt: made.psalt, lock: h.salt, box: box });
             pass = '';
             closeModal(); renderAll(); toast('生体認証で開けられるようにしました');
@@ -2670,7 +2670,7 @@
     var h = lockHead(), input = document.getElementById('lockPass'), pass = input.value;
     if (!h || appsBusy || !pass) return;
     var left = waitLeft();
-    if (left) { say('lockMsg', '何度もまちがえたので、あと' + waitText(left) + '待ってください', true); return; }
+    if (left) { say('lockMsg', '何度も間違えたので、あと' + waitText(left) + '待ってください', true); return; }
     appsBusy = true;
     say('lockMsg', '開けています…');
     Lock.key(pass, h.salt, h.iter).then(function (key) {
@@ -2745,9 +2745,9 @@
   /** 1件を暗号にして残す。id があれば、その1件を直す。o は { name, url, group, order, qr } */
   function putApp(id, o) {
     var v = vault;
-    if (!v) return Promise.reject(new Error('ロックがかかっています'));
+    if (!v) return Promise.reject(new Error('ロックが掛かっています'));
     return Lock.seal(v.key, appBody(o)).then(function (box) {
-      if (vault !== v) throw new Error('ロックがかかりました');
+      if (vault !== v) throw new Error('ロックが掛かりました');
       var cur = id ? Store.get(APPSP, 'vlt', id) : null;
       if (cur && cur.deleted) cur = null;
       saveVlt(packApp(cur ? id : newVid(), cur ? cur.createdAt : Date.now(), box, v.salt, v.iter, cur));
@@ -2910,7 +2910,7 @@
     modal('<h2>まとめて足す</h2>'
       + '<div class="hint">1行に1つ、「名称　URL」の順で書きます（間は空白）。<br>'
       + 'グループにまとめるときは、上の行にグループの名前だけを書き、終わりを空の行で区切ります。<br>'
-      + '同じURLがもうあるものは、名称とグループを新しいほうに直します。</div>'
+      + '同じURLがもうあるものは、名称とグループを新しい方に直します。</div>'
       + '<div class="f"><textarea id="b-text" rows="10" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="グループの名前&#10;名称 https://…&#10;名称 https://…"></textarea></div>'
       + '<div class="acts"><button type="button" id="b-cancel">やめる</button><button type="button" class="go" id="b-ok">足す</button></div>',
       function (m) {
@@ -2933,7 +2933,7 @@
           }
           if (read.bad && !global.confirm('読めない行が ' + read.bad + '行あります。\n読めた分だけ足しますか？')) return;
           Promise.all(todo.map(function (t) { return Lock.seal(v.key, t.body); })).then(function (boxes) {
-            if (vault !== v) throw new Error('ロックがかかりました');
+            if (vault !== v) throw new Error('ロックが掛かりました');
             var recs = [];
             todo.forEach(function (t, i) {
               var old = t.cur && Store.get(APPSP, 'vlt', t.cur.id);
@@ -2983,7 +2983,7 @@
               return Promise.all([Lock.seal(k, { check: APP.name })].concat(kept.map(function (x) { return Lock.seal(k, x.o); })));
             })
             .then(function (boxes) {
-              if (vault !== v) throw new Error('ロックがかかりました');
+              if (vault !== v) throw new Error('ロックが掛かりました');
               // ★鍵のもとと中身を、1回でまとめて書く（途中で止まると、組が合わなくなるため）
               var out = [];
               kept.forEach(function (x, i) { out = out.concat(packApp(x.rec.id, x.rec.createdAt, boxes[i + 1], salt, Lock.ITER, x.rec)); });
@@ -3030,9 +3030,9 @@
   function openBadApps() {
     var v = vault;
     if (!v || !v.bad.length) return;
-    modal('<h2>ほかのパスワードで開ける</h2>'
+    modal('<h2>他のパスワードで開ける</h2>'
       + '<div class="hint">前に、もう一方の端末で別のパスワードを使っていたときに入れた項目です。'
-      + 'そのときのパスワードを入れると、いまのパスワードで包み直して一覧に戻します。</div>'
+      + 'そのときのパスワードを入れると、今のパスワードで包み直して一覧に戻します。</div>'
       + '<div class="f"><label for="o-pass">そのときのパスワード</label><input type="password" id="o-pass" autocomplete="off"></div>'
       + '<div class="lockmsg" id="o-msg"></div>'
       + '<div class="acts"><button type="button" id="o-cancel">やめる</button><button type="button" class="go" id="o-ok">開ける</button></div>',
@@ -3047,7 +3047,7 @@
           adoptKeys(v, pass, v.bad).then(function (n) {
             pass = ''; el.value = '';
             if (!n) { btn.disabled = false; msg('開けられませんでした（パスワードが違います）', true); return; }
-            closeModal(); toast('開けました。いまのパスワードで包み直します');
+            closeModal(); toast('開けました。今のパスワードで包み直します');
           }, function () { pass = ''; btn.disabled = false; msg('開けられませんでした', true); });
         };
         setTimeout(function () { el.focus(); }, 50);
@@ -3108,7 +3108,7 @@
     h += '<div class="secttl">受け口</div><div class="card">'
       + '<div class="setrow"><div><div class="k">つなぎ先と合言葉</div><div class="d">'
       + (Sync.enabled() ? 'つないでいます' + (c.url ? '' : '（アプリに入っているつなぎ先）')
-          : (Sync.url() ? '合言葉がまだです' : 'つないでいません（いまは端末の中だけ）'))
+          : (Sync.url() ? '合言葉がまだです' : 'つないでいません（今は端末の中だけ）'))
       + '</div></div>'
       + '<button type="button" class="mini" id="s-conn">' + (Sync.enabled() ? '直す' : 'つなぐ') + '</button></div>'
       + '<div class="setrow"><div><div class="k">送っていない記録</div><div class="d">電波がない間に書いたものはここに溜まります（個人と会社の合計）</div></div>'
@@ -3129,7 +3129,7 @@
       + (diemOn() ? '<button type="button" class="mini" id="s-diemnow">今すぐ読む</button>' : '')
       + '<button type="button" class="mini" id="s-diem">' + (diemOn() ? '直す' : 'つなぐ') + '</button></div></div></div>';
 
-    h += '<div class="secttl">いまの数</div><div class="card">';
+    h += '<div class="secttl">今の数</div><div class="card">';
     Store.SPACES.forEach(function (sp) {
       var all = Store.list(sp, 'task');
       var devN = all.filter(isDev).length;
@@ -3140,12 +3140,12 @@
         + '<div class="d">タスク ' + open + '件（済み ' + (tasks.length - open) + '件）・メモ ' + Store.list(sp, 'memo').length + '件'
         + (devN ? '・部署の残りの写し ' + devN + '件' : '')
         + (sp === BUYSP && buyItems().length ? '・買い出しの品物 ' + buyItems().length + '件（今回 ' + buyNeedCount() + '件）' : '')
-        + '・' + (ss.kind === 'off' ? '端末の中だけ' : ss.kind === 'error' ? '送れていません' : ss.pending ? '未送信 ' + ss.pending + '件' : '同期ずみ')
+        + '・' + (ss.kind === 'off' ? '端末の中だけ' : ss.kind === 'error' ? '送れていません' : ss.pending ? '未送信 ' + ss.pending + '件' : '同期済み')
         + '</div></div></div>';
     });
     h += '</div>';
 
-    h += '<div class="secttl">控え（いま開いている「' + U.esc(label()) + '」の分だけ）</div><div class="card">'
+    h += '<div class="secttl">控え（今開いている「' + U.esc(label()) + '」の分だけ）</div><div class="card">'
       + '<div class="setrow"><div><div class="k">控えを書き出す</div><div class="d">タスクとメモを1つの文字にします</div></div>'
       + '<button type="button" class="mini" id="s-out">書き出す</button></div>'
       + '<div class="setrow"><div><div class="k">控えから戻す</div><div class="d">書き出した文字を貼って戻します</div></div>'
@@ -3158,7 +3158,7 @@
 
     h += '<div class="secttl">このアプリ</div><div class="card">'
       + '<div class="setrow"><div><div class="k">版</div><div class="d">' + U.esc(APP.version) + '</div></div>'
-      + '<button type="button" class="mini" id="s-back">もどる</button></div>'
+      + '<button type="button" class="mini" id="s-back">戻る</button></div>'
       + '</div>';
 
     var body = document.getElementById('setBody');
@@ -3199,7 +3199,7 @@
     };
     body.querySelector('#s-in').onclick = function () {
       modal('<h2>「' + U.esc(label()) + '」に控えから戻す</h2>'
-        + '<div class="hint">書き出した文字を貼ってください。新しいほうが残ります。</div>'
+        + '<div class="hint">書き出した文字を貼ってください。新しい方が残ります。</div>'
         + '<div class="f"><textarea id="i-text" style="min-height:200px;font-size:11px"></textarea></div>'
         + '<div class="acts"><button type="button" id="i-close">やめる</button><button type="button" class="go" id="i-ok">戻す</button></div>',
         function (m) {

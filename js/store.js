@@ -335,7 +335,7 @@
       var obj = JSON.parse(text);
       if (!obj || !obj.data) throw new Error('中身が読めません');
       if (obj.space && obj.space !== space) {
-        throw new Error('これは「' + (APP.spaces[obj.space] || {}).label + '」の控えです。いまの画面には戻せません');
+        throw new Error('これは「' + (APP.spaces[obj.space] || {}).label + '」の控えです。今の画面には戻せません');
       }
       var b = bags[space];
       KINDS.forEach(function (k) {

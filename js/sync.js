@@ -11,7 +11,7 @@
 
   function explain(obj) {
     if (obj.error === 'bad_pin') return '合言葉が違います';
-    if (obj.error === 'locked') return '合言葉を何度もまちがえたので、10分止まっています';
+    if (obj.error === 'locked') return '合言葉を何度も間違えたので、10分止まっています';
     if (obj.error === 'bad_space') return 'どちら側かが分からないので断られました（アプリが古いかもしれません）';
     if (obj.error === 'not_setup') return '受け口の用意（setup）がまだです';
     return obj.error || '断られました';
